@@ -54,7 +54,7 @@ void* g_tempRemotePlayer;
 
 static CNetGamePlayer* g_playerList[256];
 static int g_playerListCount;
-
+stating int g_maxClientsInScope = 128;
 static CNetGamePlayer* g_playerListRemote[256];
 static int g_playerListCountRemote;
 
