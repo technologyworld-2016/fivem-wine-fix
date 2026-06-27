@@ -8,6 +8,7 @@
 #include "StdInc.h"
 
 #include <ScriptEngine.h>
+#include <ScriptSerialization.h>
 
 #include <ResourceManager.h>
 #include <ResourceMetaDataComponent.h>
@@ -80,6 +81,76 @@ static bool IsPathWithinResourceRoot(const std::filesystem::path& rootPath, cons
 }
 #endif
 
+bool readResourceFile(fx::ScriptContext& context, std::vector<uint8_t>& outArray)
+{
+	const char* requestedFileName = context.CheckArgument<const char*>(1);
+
+	// find the resource
+	fx::ResourceManager* resourceManager = fx::ResourceManager::GetCurrent();
+	fwRefContainer<fx::Resource> resource = resourceManager->GetResource(context.CheckArgument<const char*>(0));
+
+	if (!resource.GetRef())
+	{
+		return false;
+	}
+
+	const auto& rootPath = resource->GetPath();
+
+	// an empty root path would read from `/...`
+	if (rootPath.empty())
+	{
+		return false;
+	}
+
+#ifndef IS_FXSERVER
+	// only load from `resources:/` for client (see CachedResourceMounter)
+	if (rootPath.find("resources:/") != 0) // find != 0 is equivalent to a !starts_with
+	{
+		return false;
+	}
+#else
+	try
+	{
+		const std::filesystem::path resourceRoot = std::filesystem::weakly_canonical(std::filesystem::absolute(std::filesystem::u8path(rootPath)));
+
+		std::string sanitizedFileName = requestedFileName;
+		while (!sanitizedFileName.empty() && (sanitizedFileName[0] == '/' || sanitizedFileName[0] == '\\'))
+		{
+			sanitizedFileName.erase(sanitizedFileName.begin());
+		}
+
+		const std::filesystem::path requestedPath = std::filesystem::u8path(sanitizedFileName);
+
+		if (requestedPath.is_absolute() || requestedPath.has_root_name())
+		{
+			return false;
+		}
+
+		const std::filesystem::path absoluteRequestedPath = std::filesystem::weakly_canonical(std::filesystem::absolute(resourceRoot / requestedPath));
+
+		if (!IsPathWithinResourceRoot(resourceRoot, absoluteRequestedPath))
+		{
+			return false;
+		}
+	}
+	catch (const std::filesystem::filesystem_error&)
+	{
+		return false;
+	}
+#endif
+
+	// try opening the file from the resource's home directory
+	fwRefContainer<vfs::Stream> stream = vfs::OpenRead(rootPath + "/" + requestedFileName);
+
+	if (!stream.GetRef())
+	{
+		return false;
+	}
+
+	outArray = stream->ReadToEnd();
+	return true;
+}
+
 static InitFunction initFunction([] ()
 {
 	fx::ScriptEngine::RegisterNativeHandler("GET_NUM_RESOURCE_METADATA", [] (fx::ScriptContext& context)
@@ -145,81 +216,15 @@ static InitFunction initFunction([] ()
 
 	fx::ScriptEngine::RegisterNativeHandler("LOAD_RESOURCE_FILE", [] (fx::ScriptContext& context)
 	{
-		const char* requestedFileName = context.CheckArgument<const char*>(1);
-
-		// find the resource
-		fx::ResourceManager* resourceManager = fx::ResourceManager::GetCurrent();
-		fwRefContainer<fx::Resource> resource = resourceManager->GetResource(context.CheckArgument<const char*>(0));
-
-		if (!resource.GetRef())
-		{
-			context.SetResult(nullptr);
-			return;
-		}
-
-		const auto& rootPath = resource->GetPath();
-
-		// an empty root path would read from `/...`
-		if (rootPath.empty())
-		{
-			context.SetResult(nullptr);
-			return;
-		}
-
-#ifndef IS_FXSERVER
-		// only load from `resources:/` for client (see CachedResourceMounter)
-		if (rootPath.find("resources:/") != 0) // find != 0 is equivalent to a !starts_with
-		{
-			context.SetResult(nullptr);
-			return;
-		}
-#else
-		try
-		{
-			const std::filesystem::path resourceRoot = std::filesystem::weakly_canonical(std::filesystem::absolute(std::filesystem::u8path(rootPath)));
-
-			std::string sanitizedFileName = requestedFileName;
-			while (!sanitizedFileName.empty() && (sanitizedFileName[0] == '/' || sanitizedFileName[0] == '\\'))
-			{
-				sanitizedFileName.erase(sanitizedFileName.begin());
-			}
-
-			const std::filesystem::path requestedPath = std::filesystem::u8path(sanitizedFileName);
-
-			if (requestedPath.is_absolute() || requestedPath.has_root_name())
-			{
-				context.SetResult(nullptr);
-				return;
-			}
-
-			const std::filesystem::path absoluteRequestedPath = std::filesystem::weakly_canonical(std::filesystem::absolute(resourceRoot / requestedPath));
-
-			if (!IsPathWithinResourceRoot(resourceRoot, absoluteRequestedPath))
-			{
-				context.SetResult(nullptr);
-				return;
-			}
-		}
-		catch (const std::filesystem::filesystem_error&)
-		{
-			context.SetResult(nullptr);
-			return;
-		}
-#endif
-
-		// try opening the file from the resource's home directory
-		fwRefContainer<vfs::Stream> stream = vfs::OpenRead(rootPath + "/" + requestedFileName);
-
-		if (!stream.GetRef())
-		{
-			context.SetResult(nullptr);
-			return;
-		}
-
 		// static, so it will persist until the next call
-		static std::vector<uint8_t> returnedArray;
-		returnedArray = stream->ReadToEnd();
-		returnedArray.push_back(0); // zero-terminate
+		static std::vector<uint8_t> returnedArray = std::vector<uint8_t>(0);
+		
+		if (!readResourceFile(context, returnedArray))
+		{
+			context.SetResult(nullptr);
+			return;
+		}
+		returnedArray.push_back(0); // zero-terminate the string
 
 		struct scrString
 		{
@@ -234,6 +239,17 @@ static InitFunction initFunction([] ()
 		};
 
 		context.SetResult(scrString{ &returnedArray[0], returnedArray.size() - 1 });
+	});
+
+	fx::ScriptEngine::RegisterNativeHandler("LOAD_RESOURCE_BINARY_FILE", [](fx::ScriptContext& context)
+	{
+		// Doesn't have to be static, because it gets serialized
+		std::vector<uint8_t> returnedArray = std::vector<uint8_t>(0);
+		readResourceFile(context, returnedArray);
+
+		// Will return an empty list if the file doesn't exist. 
+		// Returning null like in LOAD_RESOURCE_FILE causes an exception in CitizenFX.Core.ScriptContext.GetResult()
+		context.SetResult(fx::SerializeObject(returnedArray));
 	});
 
 #ifdef IS_FXSERVER
