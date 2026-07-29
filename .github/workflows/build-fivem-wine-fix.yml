@@ -21,32 +21,37 @@ jobs:
           if (Test-Path $sdkPath) {
             $sdks = Get-ChildItem $sdkPath -Directory | Select-Object -ExpandProperty Name
             Write-Output "Available Windows SDK include versions: $sdks"
-            
-            # Use the latest available
             $latest = $sdks | Sort-Object -Descending | Select-Object -First 1
             Write-Output "Setting WindowsSDKVersion=$latest"
             echo "WindowsSDKVersion=$latest" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
           
-          # Install .NET 4.6 targeting pack via NuGet
+          # Install .NET 4.6 targeting pack via NuGet packages that contain the actual assemblies
           Write-Output "Installing .NET reference assemblies..."
           $nugetDir = "$env:TEMP\nuget"
           mkdir $nugetDir -Force | Out-Null
           Invoke-WebRequest -Uri "https://dist.nuget.org/win-x86-commandline/latest/nuget.exe" -OutFile "$nugetDir\nuget.exe" -UseBasicParsing
-          & "$nugetDir\nuget.exe" install Microsoft.NETFramework.ReferenceAssemblies -Version 1.0.0 -OutputDirectory "$nugetDir\packages" -Verbosity quiet
           
-          # Find the actual install path
-          $refPath = Join-Path $nugetDir "packages\microsoft.netframework.referenceassemblies\1.0.0\build\.NETFramework"
-          if (Test-Path $refPath) {
-            $versions = Get-ChildItem $refPath -Directory | Select-Object -ExpandProperty Name
-            Write-Output "Installed .NET versions: $versions"
+          # Install the actual reference assemblies for .NET 4.6
+          $packages = @(
+            'Microsoft.NETFramework.ReferenceAssemblies.net46/1.0.3',
+            'Microsoft.NETFramework.ReferenceAssemblies/1.0.3'
+          )
+          foreach ($pkg in $packages) {
+            & "$nugetDir\nuget.exe" install $pkg -OutputDirectory "$nugetDir\packages" -Verbosity quiet -ExcludeVersion
+          }
+          
+          # Find the reference assemblies directory
+          $net46dir = "$nugetDir\packages\Microsoft.NETFramework.ReferenceAssemblies.net46\build\.NETFramework\v4.6"
+          if (-not (Test-Path $net46dir)) {
+            # Try alternative locations
+            $net46dir = "$nugetDir\packages\Microsoft.NETFramework.ReferenceAssemblies.net46\lib\net46"
+          }
+          if (Test-Path $net46dir) {
+            Write-Output "Found .NET 4.6 reference assemblies at: $net46dir"
+            echo "DOTNET46_PATH=$net46dir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           } else {
-            # Try global packages folder
-            $globalPath = "$env:USERPROFILE\.nuget\packages\microsoft.netframework.referenceassemblies\1.0.0\build\.NETFramework"
-            if (Test-Path $globalPath) {
-              $versions = Get-ChildItem $globalPath -Directory | Select-Object -ExpandProperty Name
-              Write-Output "Found .NET versions in global packages: $versions"
-            }
+            Write-Output "WARNING: Could not find .NET 4.6 reference assemblies"
           }
           Write-Output "SDK setup done"
 
@@ -92,11 +97,17 @@ jobs:
           $sdkVer = $sdkVer.TrimEnd('\')
           Write-Output "Using Windows SDK version: $sdkVer"
           
-          # Find reference assemblies directory for .NET 4.6
-          $nugetDir = "$env:TEMP\nuget"
-          $refAsmDir = Join-Path $nugetDir "packages\microsoft.netframework.referenceassemblies\1.0.0\build\.NETFramework\v4.6"
+          # Use FrameworkPathOverride for .NET 4.6 if we have it
+          $dotnet46Path = $env:DOTNET46_PATH
+          $fwOverride = ""
+          if ($dotnet46Path -and (Test-Path $dotnet46Path)) {
+            $fwOverride = "-p:FrameworkPathOverride=`"$dotnet46Path`""
+            Write-Output "Using .NET 4.6 from: $dotnet46Path"
+          } else {
+            Write-Output "WARNING: No .NET 4.6 override path set, may fail"
+          }
           
-          MSBuild.exe CitizenMP.sln -t:build -restore -p:RestorePackagesConfig=true -p:Configuration=release -p:Platform=x64 -p:WindowsTargetPlatformVersion=$sdkVer -maxcpucount:2 -v:q -fl1 "-flp1:logfile=errors.log;errorsonly"
+          MSBuild.exe CitizenMP.sln -t:build -restore -p:RestorePackagesConfig=true -p:Configuration=release -p:Platform=x64 -p:WindowsTargetPlatformVersion=$sdkVer $fwOverride -maxcpucount:2 -v:q -fl1 "-flp1:logfile=errors.log;errorsonly"
           $MSBUILD_ERROR = $LASTEXITCODE
           
           if ($MSBUILD_ERROR -eq 0) {
