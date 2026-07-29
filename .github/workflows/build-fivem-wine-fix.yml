@@ -13,6 +13,30 @@ jobs:
       - name: Add msbuild to PATH
         uses: microsoft/setup-msbuild@v2
 
+      - name: Install Windows SDK 10.0.22000
+        shell: pwsh
+        run: |
+          # Download and install Windows SDK 10.0.22000.0
+          $url = "https://go.microsoft.com/fwlink/p/?linkid=2195944"
+          $out = "$env:TEMP\winsdk_22000.exe"
+          Write-Output "Downloading Windows SDK 10.0.22000.0..."
+          Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing
+          Write-Output "Installing (quiet mode)..."
+          Start-Process -Wait -FilePath $out -ArgumentList "/quiet", "/norestart"
+          Write-Output "SDK installation complete"
+
+      - name: Install .NET Framework 4.6 targeting pack
+        shell: pwsh
+        run: |
+          # .NET Framework 4.6 Developer Pack
+          $url = "https://go.microsoft.com/fwlink/?linkid=2088631"
+          $out = "$env:TEMP\ndp46-devpack.exe"
+          Write-Output "Downloading .NET 4.6 Dev Pack..."
+          Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing
+          Write-Output "Installing..."
+          Start-Process -Wait -FilePath $out -ArgumentList "/quiet", "/norestart"
+          Write-Output ".NET 4.6 Dev Pack installed"
+
       - name: Checkout
         shell: bash
         run: |
@@ -48,7 +72,6 @@ jobs:
           
           cd code\build\$env:PROGRAM
           
-          # Use MSBuild from PATH (setup-msbuild added it), platform=x64
           MSBuild.exe CitizenMP.sln -t:build -restore -p:RestorePackagesConfig=true -p:Configuration=release -p:Platform=x64 -maxcpucount:2 -v:q -fl1 "-flp1:logfile=errors.log;errorsonly"
           $MSBUILD_ERROR = $LASTEXITCODE
           
