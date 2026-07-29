@@ -11,6 +11,9 @@ jobs:
       PROGRAM: five
       PLATFORM: windows
     steps:
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
       - name: Checkout
         shell: bash
         run: |
@@ -41,8 +44,35 @@ jobs:
         run: |
           cd "$ROOT_REPO"
           
-          chmod +x .github/workflows/ci/build_windows.sh
-          .github/workflows/ci/build_windows.sh "$ROOT_DEP" $JOB_SLOTS
+          # Find MSBuild using vswhere (more robust than hardcoded path)
+          MSBUILD=$(vswhere -latest -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe -products * | grep -E 'MSBuild\.exe$' | head -1)
+          echo "Found MSBuild at: $MSBUILD"
+          
+          if [ -z "$MSBUILD" ]; then
+            # Fallback: try from PATH
+            MSBUILD="MSBuild.exe"
+          fi
+          
+          pwsh ./fxd.ps1 get-chrome || true
+          ./prebuild.cmd || true
+          
+          pwsh ./fxd.ps1 gen -game $PROGRAM
+          
+          cd code/build/$PROGRAM
+          
+          "$MSBUILD" CitizenMP.sln -t:build -restore -p:RestorePackagesConfig=true -p:preferredtoolarchitecture=x64 -p:configuration=release -maxcpucount:4 -v:q -fl1 "-flp1:logfile=errors.log;errorsonly"
+          MSBUILD_ERROR=$?
+          
+          if [[ $MSBUILD_ERROR -eq 0 ]]; then
+            echo "Successfully built $PROGRAM"
+          else
+            RED=$'\e[31m'
+            echo "::error::Failed to build $PROGRAM, MSBuild returned with error code: $MSBUILD_ERROR"
+            if [ -f errors.log ]; then
+              while IFS= read -r LINE; do echo "$RED$LINE"; done < errors.log
+            fi
+            exit $MSBUILD_ERROR
+          fi
 
       - name: Upload FiveM artifacts
         uses: actions/upload-artifact@v4
