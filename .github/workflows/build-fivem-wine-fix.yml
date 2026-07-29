@@ -27,64 +27,47 @@ jobs:
           }
           
           # Check for pre-installed .NET reference assemblies
-          $checkPaths = @(
-            "C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.6",
-            "C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.6.1",
-            "C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.6.2",
-            "C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.7",
-            "C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.7.1",
-            "C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.7.2",
-            "C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.8"
-          )
-          $foundRef = $null
-          foreach ($p in $checkPaths) {
-            if (Test-Path "$p\mscorlib.dll") {
-              Write-Output "Found reference assemblies at: $p"
-              $foundRef = $p
-              break
+          $refBase = "C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework"
+          if (-not (Test-Path "$refBase\v4.6\mscorlib.dll")) {
+            # Download .NET 4.6 reference assemblies from .nupkg and place in system location
+            Write-Output "Installing .NET 4.6 reference assemblies..."
+            $nugetDir = "$env:TEMP\nuget"
+            mkdir $nugetDir -Force | Out-Null
+            $pkgName = "Microsoft.NETFramework.ReferenceAssemblies.net46"
+            $nupkgUrl = "https://www.nuget.org/api/v2/package/$pkgName/1.0.0"
+            Invoke-WebRequest -Uri $nupkgUrl -OutFile "$nugetDir\pkg.nupkg" -UseBasicParsing
+            Expand-Archive -Path "$nugetDir\pkg.nupkg" -DestinationPath "$nugetDir\extracted" -Force
+            
+            # Try to find where the assemblies are
+            $src = $null
+            foreach ($c in @("build\.NETFramework\v4.6", "lib\net46", "content")) {
+              $p = "$nugetDir\extracted\$c"
+              if (Test-Path "$p\mscorlib.dll") { $src = $p; break }
             }
-          }
-          
-          # Download .NET 4.6 reference assemblies from the .nupkg directly
-          $nugetDir = "$env:TEMP\nuget"
-          mkdir $nugetDir -Force | Out-Null
-          $pkgName = "Microsoft.NETFramework.ReferenceAssemblies.net46"
-          $pkgVer = "1.0.0"
-          $nupkgUrl = "https://www.nuget.org/api/v2/package/$pkgName/$pkgVer"
-          $nupkgFile = "$nugetDir\$pkgName.$pkgVer.nupkg"
-          $extractDir = "$nugetDir\refasm"
-          
-          Write-Output "Downloading $pkgName v$pkgVer..."
-          Invoke-WebRequest -Uri $nupkgUrl -OutFile $nupkgFile -UseBasicParsing
-          
-          Write-Output "Extracting NuGet package..."
-          Expand-Archive -Path $nupkgFile -DestinationPath $extractDir -Force
-          
-          # Find the reference assemblies directory inside the extracted package
-          $asmDir = $null
-          $candidates = @(
-            "$extractDir\build\.NETFramework\v4.6",
-            "$extractDir\lib\net46",
-            "$extractDir\content\netframework\v4.6"
-          )
-          foreach ($c in $candidates) {
-            if (Test-Path "$c\mscorlib.dll") {
-              $asmDir = $c
-              break
+            if (-not $src) {
+              # Search recursively
+              $src = Get-ChildItem "$nugetDir\extracted" -Filter "mscorlib.dll" -Recurse | Select-Object -First 1 -ExpandProperty DirectoryName
             }
-          }
-          
-          if ($asmDir) {
-            Write-Output "Found .NET 4.6 reference assemblies at: $asmDir"
-            echo "DOTNET46_PATH=$asmDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          } elseif ($foundRef) {
-            Write-Output "Using pre-installed reference assemblies at: $foundRef"
-            echo "DOTNET46_PATH=$foundRef" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            if ($src) {
+              $dest = "$refBase\v4.6"
+              mkdir $dest -Force | Out-Null
+              Copy-Item "$src\*" $dest -Recurse -Force
+              Write-Output "Copied .NET 4.6 ref assemblies to $dest"
+            }
           } else {
-            Write-Output "WARNING: Could not find .NET 4.6 reference assemblies anywhere"
-            Write-Output "Contents of extracted package:"
-            Get-ChildItem -Recurse $extractDir | Select-Object -First 100 FullName
+            Write-Output ".NET 4.6 reference assemblies already present"
           }
+          
+          # Install ATL build tools for C++ projects
+          Write-Output "Installing ATL build tools..."
+          $vsWhere = "C:\Program Files\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vsWhere -latest -property installationPath
+          if ($vsPath) {
+            $vsInstaller = Join-Path $vsPath "Installer\setup.exe"
+            & $vsInstaller modify --installPath "`"$vsPath`"" --add Microsoft.VisualStudio.Component.VC.ATL --passive --norestart --wait 2>&1 | Write-Output
+            Write-Output "ATL installation initiated"
+          }
+          
           Write-Output "SDK setup done"
 
       - name: Checkout
@@ -129,17 +112,7 @@ jobs:
           $sdkVer = $sdkVer.TrimEnd('\')
           Write-Output "Using Windows SDK version: $sdkVer"
           
-          # Use FrameworkPathOverride for .NET 4.6 if we have it
-          $dotnet46Path = $env:DOTNET46_PATH
-          $fwOverride = ""
-          if ($dotnet46Path -and (Test-Path $dotnet46Path)) {
-            $fwOverride = "-p:FrameworkPathOverride=`"$dotnet46Path`""
-            Write-Output "Using .NET 4.6 from: $dotnet46Path"
-          } else {
-            Write-Output "WARNING: No .NET 4.6 override path set, may fail"
-          }
-          
-          MSBuild.exe CitizenMP.sln -t:build -restore -p:RestorePackagesConfig=true -p:Configuration=release -p:Platform=x64 -p:WindowsTargetPlatformVersion=$sdkVer $fwOverride -maxcpucount:2 -v:q -fl1 "-flp1:logfile=errors.log;errorsonly"
+          MSBuild.exe CitizenMP.sln -t:build -restore -p:RestorePackagesConfig=true -p:Configuration=release -p:Platform=x64 -p:WindowsTargetPlatformVersion=$sdkVer -maxcpucount:2 -v:q -fl1 "-flp1:logfile=errors.log;errorsonly"
           $MSBUILD_ERROR = $LASTEXITCODE
           
           if ($MSBUILD_ERROR -eq 0) {
