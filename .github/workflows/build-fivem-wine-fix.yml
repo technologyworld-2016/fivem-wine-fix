@@ -9,7 +9,6 @@ jobs:
     runs-on: windows-latest
     env:
       PROGRAM: five
-      PLATFORM: windows
     steps:
       - name: Add msbuild to PATH
         uses: microsoft/setup-msbuild@v2
@@ -35,28 +34,8 @@ jobs:
           git remote add origin https://github.com/technologyworld-2016/fivem-wine-fix.git
           git pull origin wine-win10 --depth=1
           git submodule update --jobs=$JOB_SLOTS --init --depth=1
-        
-      - name: Dependencies
-        shell: bash
-        run: |
-          set +e
-          mkdir -p "$ROOT_DEP" && cd "$_" || exit 1
 
-      - name: Find MSBuild
-        shell: bash
-        run: |
-          set +e
-          MSBUILD=$(vswhere -latest -requires Microsoft.Component.MSBuild -find MSBuild/**/Bin/MSBuild.exe -products "*" 2>/dev/null | grep -E 'MSBuild\.exe$' | head -1)
-          if [ -z "$MSBUILD" ]; then
-            MSBUILD=$(which MSBuild.exe 2>/dev/null)
-          fi
-          if [ -z "$MSBUILD" ]; then
-            MSBUILD="MSBuild.exe"
-          fi
-          echo "Found MSBuild at: $MSBUILD"
-          echo "MSBUILD_PATH=$MSBUILD" >> "$GITHUB_ENV"
-      
-      - name: Compile
+      - name: Build
         shell: pwsh
         run: |
           cd $env:ROOT_REPO
@@ -69,7 +48,8 @@ jobs:
           
           cd code\build\$env:PROGRAM
           
-          & "$env:MSBUILD_PATH" CitizenMP.sln -t:build -restore -p:RestorePackagesConfig=true -p:preferredtoolarchitecture=x64 -p:configuration=release -maxcpucount:2 -v:q -fl1 "-flp1:logfile=errors.log;errorsonly"
+          # Use MSBuild from PATH (setup-msbuild added it), platform=x64
+          MSBuild.exe CitizenMP.sln -t:build -restore -p:RestorePackagesConfig=true -p:Configuration=release -p:Platform=x64 -maxcpucount:2 -v:q -fl1 "-flp1:logfile=errors.log;errorsonly"
           $MSBUILD_ERROR = $LASTEXITCODE
           
           if ($MSBUILD_ERROR -eq 0) {
