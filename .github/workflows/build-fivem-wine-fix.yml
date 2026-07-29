@@ -13,29 +13,30 @@ jobs:
       - name: Add msbuild to PATH
         uses: microsoft/setup-msbuild@v2
 
-      - name: Install Windows SDK 10.0.22000
+      - name: Setup SDK
         shell: pwsh
         run: |
-          # Download and install Windows SDK 10.0.22000.0
-          $url = "https://go.microsoft.com/fwlink/p/?linkid=2195944"
-          $out = "$env:TEMP\winsdk_22000.exe"
-          Write-Output "Downloading Windows SDK 10.0.22000.0..."
-          Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing
-          Write-Output "Installing (quiet mode)..."
-          Start-Process -Wait -FilePath $out -ArgumentList "/quiet", "/norestart"
-          Write-Output "SDK installation complete"
-
-      - name: Install .NET Framework 4.6 targeting pack
-        shell: pwsh
-        run: |
-          # .NET Framework 4.6 Developer Pack
-          $url = "https://go.microsoft.com/fwlink/?linkid=2088631"
-          $out = "$env:TEMP\ndp46-devpack.exe"
-          Write-Output "Downloading .NET 4.6 Dev Pack..."
-          Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing
-          Write-Output "Installing..."
-          Start-Process -Wait -FilePath $out -ArgumentList "/quiet", "/norestart"
-          Write-Output ".NET 4.6 Dev Pack installed"
+          # Check available Windows SDK versions
+          $sdkPath = "C:\Program Files (x86)\Windows Kits\10\Include"
+          if (Test-Path $sdkPath) {
+            $sdks = Get-ChildItem $sdkPath -Directory | Select-Object -ExpandProperty Name
+            Write-Output "Available Windows SDK include versions: $sdks"
+            
+            # Use the latest available
+            $latest = $sdks | Sort-Object -Descending | Select-Object -First 1
+            Write-Output "Setting WindowsSDKVersion=$latest"
+            echo "WindowsSDKVersion=$latest" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+          
+          # Install .NET 4.6 targeting pack
+          Write-Output "Installing .NET 4.6 reference assemblies..."
+          $nugetDir = "$env:TEMP\nuget"
+          mkdir $nugetDir -Force | Out-Null
+          Invoke-WebRequest -Uri "https://dist.nuget.org/win-x86-commandline/latest/nuget.exe" -OutFile "$nugetDir\nuget.exe" -UseBasicParsing
+          & "$nugetDir\nuget.exe" install Microsoft.NETFramework.ReferenceAssemblies -Version 1.0.0 -OutputDirectory "$nugetDir\packages"
+          Write-Output "Available .NET versions in packages:"
+          Get-ChildItem "$nugetDir\packages\microsoft.netframework.referenceassemblies\1.0.0\build\.NETFramework\" -Directory | Select-Object -ExpandProperty Name
+          Write-Output "SDK setup done"
 
       - name: Checkout
         shell: bash
@@ -72,7 +73,22 @@ jobs:
           
           cd code\build\$env:PROGRAM
           
-          MSBuild.exe CitizenMP.sln -t:build -restore -p:RestorePackagesConfig=true -p:Configuration=release -p:Platform=x64 -maxcpucount:2 -v:q -fl1 "-flp1:logfile=errors.log;errorsonly"
+          # Find .NET 4.6 reference assemblies
+          $nugetDir = "$env:TEMP\nuget"
+          $dotnet46Path = Join-Path $nugetDir "packages\microsoft.netframework.referenceassemblies\1.0.0\build\.NETFramework\v4.6"
+          
+          # Get Windows SDK version from env or use a fallback
+          $sdkVer = $env:WindowsSDKVersion
+          if (-not $sdkVer) { $sdkVer = "10.0.22621.0" }
+          # Remove trailing backslash if present
+          $sdkVer = $sdkVer.TrimEnd('\')
+          Write-Output "Using Windows SDK version: $sdkVer"
+          
+          # Find reference assemblies directory for .NET 4.6
+          $nugetDir = "$env:TEMP\nuget"
+          $refAsmDir = Join-Path $nugetDir "packages\microsoft.netframework.referenceassemblies\1.0.0\build\.NETFramework\v4.6"
+          
+          MSBuild.exe CitizenMP.sln -t:build -restore -p:RestorePackagesConfig=true -p:Configuration=release -p:Platform=x64 -p:WindowsTargetPlatformVersion=$sdkVer -maxcpucount:2 -v:q -fl1 "-flp1:logfile=errors.log;errorsonly"
           $MSBUILD_ERROR = $LASTEXITCODE
           
           if ($MSBUILD_ERROR -eq 0) {
