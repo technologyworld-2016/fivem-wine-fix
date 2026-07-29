@@ -17,6 +17,7 @@ jobs:
       - name: Checkout
         shell: bash
         run: |
+          set +e
           ROOT="C:\b"
           ROOT_REPO="$ROOT/$PROGRAM"
           ROOT_DEP="$ROOT/dep"
@@ -38,41 +39,48 @@ jobs:
       - name: Dependencies
         shell: bash
         run: |
+          set +e
           mkdir -p "$ROOT_DEP" && cd "$_" || exit 1
-      
-      - name: Compile
+
+      - name: Find MSBuild
         shell: bash
         run: |
-          cd "$ROOT_REPO"
-          
-          # Find MSBuild using vswhere
-          MSBUILD=$(vswhere -latest -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe -products * | grep -E 'MSBuild\.exe$' | head -1)
-          echo "Found MSBuild at: $MSBUILD"
-          
+          set +e
+          MSBUILD=$(vswhere -latest -requires Microsoft.Component.MSBuild -find MSBuild/**/Bin/MSBuild.exe -products "*" 2>/dev/null | grep -E 'MSBuild\.exe$' | head -1)
+          if [ -z "$MSBUILD" ]; then
+            MSBUILD=$(which MSBuild.exe 2>/dev/null)
+          fi
           if [ -z "$MSBUILD" ]; then
             MSBUILD="MSBuild.exe"
           fi
+          echo "Found MSBuild at: $MSBUILD"
+          echo "MSBUILD_PATH=$MSBUILD" >> "$GITHUB_ENV"
+      
+      - name: Compile
+        shell: pwsh
+        run: |
+          cd $env:ROOT_REPO
+          Write-Output "Building in $pwd"
           
-          pwsh ./fxd.ps1 get-chrome || true
-          ./prebuild.cmd || true
+          .\fxd.ps1 get-chrome
+          .\prebuild.cmd
           
-          pwsh ./fxd.ps1 gen -game $PROGRAM
+          .\fxd.ps1 gen -game $env:PROGRAM
           
-          cd code/build/$PROGRAM
+          cd code\build\$env:PROGRAM
           
-          "$MSBUILD" CitizenMP.sln -t:build -restore -p:RestorePackagesConfig=true -p:preferredtoolarchitecture=x64 -p:configuration=release -maxcpucount:2 -v:q -fl1 "-flp1:logfile=errors.log;errorsonly"
-          MSBUILD_ERROR=$?
+          & "$env:MSBUILD_PATH" CitizenMP.sln -t:build -restore -p:RestorePackagesConfig=true -p:preferredtoolarchitecture=x64 -p:configuration=release -maxcpucount:2 -v:q -fl1 "-flp1:logfile=errors.log;errorsonly"
+          $MSBUILD_ERROR = $LASTEXITCODE
           
-          if [[ $MSBUILD_ERROR -eq 0 ]]; then
-            echo "Successfully built $PROGRAM"
-          else
-            RED=$'\e[31m'
-            echo "::error::Failed to build $PROGRAM, MSBuild returned with error code: $MSBUILD_ERROR"
-            if [ -f errors.log ]; then
-              while IFS= read -r LINE; do echo "$RED$LINE"; done < errors.log
-            fi
+          if ($MSBUILD_ERROR -eq 0) {
+            Write-Output "Successfully built $env:PROGRAM"
+          } else {
+            Write-Output "::error::Failed to build $env:PROGRAM, MSBuild returned with error code: $MSBUILD_ERROR"
+            if (Test-Path errors.log) {
+              Get-Content errors.log | ForEach-Object { Write-Output $_ }
+            }
             exit $MSBUILD_ERROR
-          fi
+          }
 
       - name: Upload FiveM artifacts
         uses: actions/upload-artifact@v4
