@@ -28,14 +28,26 @@ jobs:
             echo "WindowsSDKVersion=$latest" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
           
-          # Install .NET 4.6 targeting pack
-          Write-Output "Installing .NET 4.6 reference assemblies..."
+          # Install .NET 4.6 targeting pack via NuGet
+          Write-Output "Installing .NET reference assemblies..."
           $nugetDir = "$env:TEMP\nuget"
           mkdir $nugetDir -Force | Out-Null
           Invoke-WebRequest -Uri "https://dist.nuget.org/win-x86-commandline/latest/nuget.exe" -OutFile "$nugetDir\nuget.exe" -UseBasicParsing
-          & "$nugetDir\nuget.exe" install Microsoft.NETFramework.ReferenceAssemblies -Version 1.0.0 -OutputDirectory "$nugetDir\packages"
-          Write-Output "Available .NET versions in packages:"
-          Get-ChildItem "$nugetDir\packages\microsoft.netframework.referenceassemblies\1.0.0\build\.NETFramework\" -Directory | Select-Object -ExpandProperty Name
+          & "$nugetDir\nuget.exe" install Microsoft.NETFramework.ReferenceAssemblies -Version 1.0.0 -OutputDirectory "$nugetDir\packages" -Verbosity quiet
+          
+          # Find the actual install path
+          $refPath = Join-Path $nugetDir "packages\microsoft.netframework.referenceassemblies\1.0.0\build\.NETFramework"
+          if (Test-Path $refPath) {
+            $versions = Get-ChildItem $refPath -Directory | Select-Object -ExpandProperty Name
+            Write-Output "Installed .NET versions: $versions"
+          } else {
+            # Try global packages folder
+            $globalPath = "$env:USERPROFILE\.nuget\packages\microsoft.netframework.referenceassemblies\1.0.0\build\.NETFramework"
+            if (Test-Path $globalPath) {
+              $versions = Get-ChildItem $globalPath -Directory | Select-Object -ExpandProperty Name
+              Write-Output "Found .NET versions in global packages: $versions"
+            }
+          }
           Write-Output "SDK setup done"
 
       - name: Checkout
@@ -72,10 +84,6 @@ jobs:
           .\fxd.ps1 gen -game $env:PROGRAM
           
           cd code\build\$env:PROGRAM
-          
-          # Find .NET 4.6 reference assemblies
-          $nugetDir = "$env:TEMP\nuget"
-          $dotnet46Path = Join-Path $nugetDir "packages\microsoft.netframework.referenceassemblies\1.0.0\build\.NETFramework\v4.6"
           
           # Get Windows SDK version from env or use a fallback
           $sdkVer = $env:WindowsSDKVersion
