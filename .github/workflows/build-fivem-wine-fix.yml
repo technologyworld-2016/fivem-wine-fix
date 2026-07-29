@@ -1,0 +1,54 @@
+name: Build FiveM Client (Wine Fix)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build_fivem:
+    name: FiveM Windows Client
+    runs-on: windows-latest
+    env:
+      PROGRAM: five
+      PLATFORM: windows
+    steps:
+      - name: Checkout
+        shell: bash
+        run: |
+          ROOT="C:\b"
+          ROOT_REPO="$ROOT/$PROGRAM"
+          ROOT_DEP="$ROOT/dep"
+          JOB_SLOTS=$(nproc --all);
+          
+          echo "ROOT_REPO=$ROOT_REPO" >> "$GITHUB_ENV"
+          echo "ROOT_DEP=$ROOT_DEP" >> "$GITHUB_ENV"
+          echo "JOB_SLOTS=$JOB_SLOTS" >> "$GITHUB_ENV"
+          
+          mkdir -p "$ROOT_REPO" && cd "$_" || exit 1
+          
+          git init .
+          git config core.symlinks true
+          git remote add origin https://github.com/technologyworld-2016/fivem-wine-fix.git
+          git pull origin wine-win10 --depth=1
+          git submodule update --jobs=$JOB_SLOTS --init --depth=1
+        
+      - name: Dependencies
+        shell: bash
+        run: |
+          mkdir -p "$ROOT_DEP" && cd "$_" || exit 1
+      
+      - name: Compile
+        shell: bash
+        run: |
+          cd "$ROOT_REPO"
+          
+          chmod +x .github/workflows/ci/build_windows.sh
+          .github/workflows/ci/build_windows.sh "$ROOT_DEP" $JOB_SLOTS
+
+      - name: Upload FiveM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: FiveM-WineFix
+          path: |
+            ${{ env.ROOT_REPO }}/code/build/five/bin/
+            ${{ env.ROOT_REPO }}/code/build/five/output/
+          if-no-files-found: warn
