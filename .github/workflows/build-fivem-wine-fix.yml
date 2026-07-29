@@ -60,12 +60,30 @@ jobs:
           
           # Install ATL build tools for C++ projects
           Write-Output "Installing ATL build tools..."
-          $vsWhere = "C:\Program Files\Microsoft Visual Studio\Installer\vswhere.exe"
-          $vsPath = & $vsWhere -latest -property installationPath
-          if ($vsPath) {
-            $vsInstaller = Join-Path $vsPath "Installer\setup.exe"
-            & $vsInstaller modify --installPath "`"$vsPath`"" --add Microsoft.VisualStudio.Component.VC.ATL --passive --norestart --wait 2>&1 | Write-Output
-            Write-Output "ATL installation initiated"
+          # Find vswhere in multiple possible locations
+          $vsWhereCandidates = @(
+            "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe",
+            "C:\Program Files\Microsoft Visual Studio\Installer\vswhere.exe",
+            "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          )
+          $vsWhere = $null
+          foreach ($c in $vsWhereCandidates) { if (Test-Path $c) { $vsWhere = $c; break } }
+          if (-not $vsWhere) { $vsWhere = Get-Command "vswhere" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source }
+          
+          if ($vsWhere) {
+            $vsPath = & $vsWhere -latest -property installationPath
+            if ($vsPath) {
+              $vsInstaller = Join-Path $vsPath "Installer\setup.exe"
+              if (Test-Path $vsInstaller) {
+                & $vsInstaller modify --installPath "`"$vsPath`"" --add Microsoft.VisualStudio.Component.VC.ATL --passive --norestart --wait 2>&1 | Write-Output
+                Write-Output "ATL installation initiated"
+              } else {
+                Write-Output "VS installer not found at $vsInstaller"
+              }
+            }
+          } else {
+            Write-Output "vswhere not found, trying choco for ATL..."
+            choco install visualstudio2022-workload-nativedesktop --no-progress -y 2>&1 | Write-Output
           }
           
           Write-Output "SDK setup done"
