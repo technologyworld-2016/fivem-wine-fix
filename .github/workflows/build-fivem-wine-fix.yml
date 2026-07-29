@@ -66,7 +66,16 @@ jobs:
             $vsPath = & "$vsInstallerDir\vswhere.exe" -latest -property installationPath
             if ($vsPath) {
               Write-Output "Modifying VS at $vsPath to add ATL..."
-              & $setupExe modify --installPath "$vsPath" --add Microsoft.VisualStudio.Component.VC.ATL --passive --norestart --wait 2>&1 | Write-Output
+              $proc = Start-Process -FilePath $setupExe -ArgumentList "modify --installPath `"$vsPath`" --add Microsoft.VisualStudio.Component.VC.ATL --passive --norestart" -NoNewWindow -PassThru
+              if ($proc) {
+                Write-Output "Waiting for ATL installer (PID $($proc.Id)) to finish..."
+                $proc | Wait-Process -Timeout 300 -ErrorAction SilentlyContinue
+                if (-not $proc.HasExited) {
+                  Write-Output "ATL install timed out after 5 min, killing..."
+                  $proc | Stop-Process -Force
+                }
+                Write-Output "ATL installer exited with code $($proc.ExitCode)"
+              }
             }
           } else {
             Write-Output "VS installer not found at $setupExe"
