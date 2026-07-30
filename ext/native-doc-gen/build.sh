@@ -12,7 +12,7 @@ YARN=yarn
 [ "$OS" != "Windows_NT" ] && NODE=/tmp/node/node/bin/node
 YARN="$NODE $ROOT/yarn_cli.js --mutex network"
 
-[ "$OS" == "Windows_NT" ] && curl --retry 3 --retry-delay 5 -Lo node.exe https://nodejs.org/dist/v20.18.0/win-x64/node.exe --http1.1
+[ "$OS" == "Windows_NT" ] && curl -z node.exe --retry 3 --retry-delay 5 -Lo node.exe https://nodejs.org/dist/v20.18.0/win-x64/node.exe --http1.1
 [ "$OS" != "Windows_NT" ] && mkdir /tmp/node && \
 	curl -Lo /tmp/node/node.tar.gz https://content.cfx.re/mirrors/vendor/node/v12.22.12/node-v12.22.12-linux-x64-musl.tar.gz && \
 	tar -C /tmp/node -xf /tmp/node/node.tar.gz && \
