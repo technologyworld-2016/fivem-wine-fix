@@ -92,12 +92,16 @@ jobs:
           cd $env:ROOT_REPO
           Write-Output "Building in $pwd"
           
-          # Fix ffi-napi: yarn global cache has ip-address with ?? operator (needs Node 14+),
-          # but node-gyp uses Node 12. Patch the file to use || instead.
-          $ipv6file = "$env:USERPROFILE\AppData\Local\Yarn\Data\global\node_modules\ip-address\dist\ipv6.js"
-          if (Test-Path $ipv6file) {
-            Write-Output "Patching $ipv6file for Node.js 12 compatibility..."
-            (Get-Content $ipv6file) -replace '\?\?', '||' | Set-Content $ipv6file
+          # Install modern Node.js for ffi-napi build, then fix yarn global cache
+          $nodeDir = "C:\hostedtoolcache\windows\node\20.20.2\x64"
+          if (Test-Path "$nodeDir\node.exe") {
+            $env:Path = "$nodeDir;$env:Path"
+            Write-Output "Using Node $(node --version) from $nodeDir"
+          }
+          # Patch the yarn global cache's ip-address package (has ?? not supported by Node 12 node-gyp)
+          Get-ChildItem -Path "$env:LOCALAPPDATA\Yarn" -Filter "ipv6.js" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Output "Patching $($_.FullName)..."
+            (Get-Content $_.FullName) -replace '\?\?', '||' | Set-Content $_.FullName
           }
           
           .\fxd.ps1 get-chrome
@@ -109,9 +113,13 @@ jobs:
           $slnFile = "code\build\$env:PROGRAM\CitizenMP.sln"
           if (Test-Path $slnFile) {
             $sln = Get-Content $slnFile
+            $countBefore = ($sln | Select-String "nui-core" | Measure-Object).Count
             $sln = $sln -replace '(?ms)^Project\("[^"]+"\) = "nui-core".*?EndProject\r?\n', ''
             $sln | Set-Content $slnFile
-            Write-Output "Removed nui-core project from solution"
+            $countAfter = ($sln | Select-String "nui-core" | Measure-Object).Count
+            Write-Output "Removed nui-core from solution (found $countBefore times, now $countAfter)"
+          } else {
+            Write-Output "Solution file not found at $slnFile"
           }
           
           cd code\build\$env:PROGRAM
