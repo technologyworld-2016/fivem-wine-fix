@@ -96,7 +96,7 @@ jobs:
           # Replace it with Node.js 20 to fix the ?? operator issue in yarn global cache
           $node20Dir = "C:\hostedtoolcache\windows\node\20.20.2\x64"
           $bundledNode = ".\ext\native-doc-gen\node.exe"
-          if (Test-Path "$node20Dir\node.exe" -and (Test-Path $bundledNode)) {
+          if ((Test-Path "$node20Dir\node.exe") -and (Test-Path $bundledNode)) {
             Copy-Item "$node20Dir\node.exe" $bundledNode -Force
             Write-Output "Replaced bundled node.exe with Node $(node --version)"
           } elseif (Test-Path $bundledNode) {
