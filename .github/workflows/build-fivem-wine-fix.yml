@@ -92,23 +92,18 @@ jobs:
           cd $env:ROOT_REPO
           Write-Output "Building in $pwd"
           
+          .\fxd.ps1 get-chrome
+          
           # ffi-napi uses FiveM's bundled Node.js at ext/native-doc-gen/node.exe (v12)
-          # Replace it with Node.js 20 to fix the ?? operator issue in yarn global cache
-          $node20Dir = "C:\hostedtoolcache\windows\node\20.20.2\x64"
+          # Replace it with Node 20 so node-gyp can parse ?? operator in yarn cache
           $bundledNode = ".\ext\native-doc-gen\node.exe"
+          $node20Dir = "C:\hostedtoolcache\windows\node\20.20.2\x64"
           if ((Test-Path "$node20Dir\node.exe") -and (Test-Path $bundledNode)) {
             Copy-Item "$node20Dir\node.exe" $bundledNode -Force
-            Write-Output "Replaced bundled node.exe with Node $(node --version)"
-          } elseif (Test-Path $bundledNode) {
-            Write-Output "Bundled node.exe version: $(& $bundledNode --version)"
+            Write-Output "Replaced bundled node.exe with Node 20"
           }
-          # Also patch ipv6.js in yarn cache as fallback
-          Get-ChildItem -Path "$env:LOCALAPPDATA\Yarn" -Filter "ipv6.js" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
-            Write-Output "Patching $($_.FullName)..."
-            (Get-Content $_.FullName) -replace '\?\?', '||' | Set-Content $_.FullName
-          }
+          & $bundledNode --version
           
-          .\fxd.ps1 get-chrome
           .\prebuild.cmd
           
           .\fxd.ps1 gen -game $env:PROGRAM
@@ -116,14 +111,15 @@ jobs:
           # Remove nui-core from solution (requires ATL build tools not available on runner)
           $slnFile = "code\build\$env:PROGRAM\CitizenMP.sln"
           if (Test-Path $slnFile) {
-            $sln = Get-Content $slnFile -Raw
-            $countBefore = ([regex]::Matches($sln, "nui-core")).Count
-            # Remove the project declaration and its EndProject line
-            $sln = $sln -replace '(?m)^Project\("[^"]+"\) = "nui-core", ".*", "{.*}"\r?\nEndProject\r?\n', ''
-            $sln = $sln -replace '(?m)\{nui-core.*?\}', ''  # Also clean up any GlobalSection references
-            Set-Content -Path $slnFile -Value $sln
-            $countAfter = ([regex]::Matches((Get-Content $slnFile -Raw), "nui-core")).Count
-            Write-Output "Removed nui-core from solution ($countBefore -> $countAfter occurrences)"
+            $slnText = [System.IO.File]::ReadAllText($slnFile)
+            $countBefore = ([regex]::Matches($slnText, 'nui-core')).Count
+            # Remove project + EndProject block by name
+            $slnText = [regex]::Replace($slnText, '(?m)^Project\("{.*}"\) = "nui-core", ".*", "{.*}"\s*$(\r?\nEndProject\s*$)?', '')
+            # Remove matching GlobalSection lines that reference nui-core's GUID
+            $slnText = [regex]::Replace($slnText, '(?m)^\s*\{.*\}.*nui-core.*$(\r?\n)?', '')
+            [System.IO.File]::WriteAllText($slnFile, $slnText)
+            $countAfter = ([regex]::Matches([System.IO.File]::ReadAllText($slnFile), 'nui-core')).Count
+            Write-Output "Removed nui-core from solution ($countBefore -> $countAfter)"
           } else {
             Write-Output "Solution file not found at $slnFile"
           }
