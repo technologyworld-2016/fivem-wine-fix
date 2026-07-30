@@ -92,13 +92,17 @@ jobs:
           cd $env:ROOT_REPO
           Write-Output "Building in $pwd"
           
-          # Install modern Node.js for ffi-napi build, then fix yarn global cache
-          $nodeDir = "C:\hostedtoolcache\windows\node\20.20.2\x64"
-          if (Test-Path "$nodeDir\node.exe") {
-            $env:Path = "$nodeDir;$env:Path"
-            Write-Output "Using Node $(node --version) from $nodeDir"
+          # ffi-napi uses FiveM's bundled Node.js at ext/native-doc-gen/node.exe (v12)
+          # Replace it with Node.js 20 to fix the ?? operator issue in yarn global cache
+          $node20Dir = "C:\hostedtoolcache\windows\node\20.20.2\x64"
+          $bundledNode = ".\ext\native-doc-gen\node.exe"
+          if (Test-Path "$node20Dir\node.exe" -and (Test-Path $bundledNode)) {
+            Copy-Item "$node20Dir\node.exe" $bundledNode -Force
+            Write-Output "Replaced bundled node.exe with Node $(node --version)"
+          } elseif (Test-Path $bundledNode) {
+            Write-Output "Bundled node.exe version: $(& $bundledNode --version)"
           }
-          # Patch the yarn global cache's ip-address package (has ?? not supported by Node 12 node-gyp)
+          # Also patch ipv6.js in yarn cache as fallback
           Get-ChildItem -Path "$env:LOCALAPPDATA\Yarn" -Filter "ipv6.js" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
             Write-Output "Patching $($_.FullName)..."
             (Get-Content $_.FullName) -replace '\?\?', '||' | Set-Content $_.FullName
