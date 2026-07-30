@@ -94,20 +94,6 @@ jobs:
           
           .\fxd.ps1 get-chrome
           
-          # Pre-place Node 20 at ext/native-doc-gen/node.exe BEFORE prebuild.cmd runs.
-          # build.sh downloads Node 12 via: curl -z node.exe -Lo node.exe https://...
-          # With -z (conditional), a pre-placed file with future timestamp prevents overwrite
-          $bundledNodeDir = ".\ext\native-doc-gen"
-          $node20Dir = "C:\hostedtoolcache\windows\node\20.20.2\x64"
-          if (Test-Path "$node20Dir\node.exe") {
-            if (-not (Test-Path $bundledNodeDir)) { New-Item -ItemType Directory -Force $bundledNodeDir | Out-Null }
-            Copy-Item "$node20Dir\node.exe" "$bundledNodeDir\node.exe" -Force
-            # Set timestamp far in future so build.sh's curl -z won't overwrite
-            (Get-ChildItem "$bundledNodeDir\node.exe").LastWriteTime = Get-Date "2099-01-01"
-            Write-Output "Pre-placed Node 20 at $bundledNodeDir\node.exe"
-            & "$bundledNodeDir\node.exe" --version
-          }
-          
           .\prebuild.cmd
           
           .\fxd.ps1 gen -game $env:PROGRAM
