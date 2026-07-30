@@ -116,12 +116,14 @@ jobs:
           # Remove nui-core from solution (requires ATL build tools not available on runner)
           $slnFile = "code\build\$env:PROGRAM\CitizenMP.sln"
           if (Test-Path $slnFile) {
-            $sln = Get-Content $slnFile
-            $countBefore = ($sln | Select-String "nui-core" | Measure-Object).Count
-            $sln = $sln -replace '(?ms)^Project\("[^"]+"\) = "nui-core".*?EndProject\r?\n', ''
-            $sln | Set-Content $slnFile
-            $countAfter = ($sln | Select-String "nui-core" | Measure-Object).Count
-            Write-Output "Removed nui-core from solution (found $countBefore times, now $countAfter)"
+            $sln = Get-Content $slnFile -Raw
+            $countBefore = ([regex]::Matches($sln, "nui-core")).Count
+            # Remove the project declaration and its EndProject line
+            $sln = $sln -replace '(?m)^Project\("[^"]+"\) = "nui-core", ".*", "{.*}"\r?\nEndProject\r?\n', ''
+            $sln = $sln -replace '(?m)\{nui-core.*?\}', ''  # Also clean up any GlobalSection references
+            Set-Content -Path $slnFile -Value $sln
+            $countAfter = ([regex]::Matches((Get-Content $slnFile -Raw), "nui-core")).Count
+            Write-Output "Removed nui-core from solution ($countBefore -> $countAfter occurrences)"
           } else {
             Write-Output "Solution file not found at $slnFile"
           }
