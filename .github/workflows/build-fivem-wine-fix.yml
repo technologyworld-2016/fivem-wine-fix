@@ -92,7 +92,19 @@ jobs:
           cd $env:ROOT_REPO
           Write-Output "Building in $pwd"
           
-          .\fxd.ps1 get-chrome
+          # Clean = -prefixed env vars (GitHub Actions sets these, causes spawn EINVAL on Windows)
+          Get-ChildItem Env: | Where-Object { $_.Name -match '^=' } | Remove-Item
+          
+          # Pre-place Node 20 at ext/native-doc-gen/node.exe with future timestamp
+          # build.sh's curl -z won't overwrite a newer file, so this prevents download failures
+          $bundledNodeDir = ".\ext\native-doc-gen"
+          $node20Dir = "C:\hostedtoolcache\windows\node\20.20.2\x64"
+          if (Test-Path "$node20Dir\node.exe") {
+            New-Item -ItemType Directory -Force $bundledNodeDir | Out-Null
+            Copy-Item "$node20Dir\node.exe" "$bundledNodeDir\node.exe" -Force
+            (Get-ChildItem "$bundledNodeDir\node.exe").LastWriteTime = Get-Date "2099-01-01"
+            Write-Output "Pre-placed Node 20 at $bundledNodeDir\node.exe with 2099 timestamp"
+          }
           
           .\prebuild.cmd
           
@@ -125,6 +137,14 @@ jobs:
             Write-Output "Removed nui-core from solution ($countBefore -> $countAfter)"
           } else {
             Write-Output "Solution file not found at $slnFile"
+          }
+          
+          # Also delete nui-core .vcxproj files so MSBuild can't find them
+          $nuiCoreProj = "code\build\$env:PROGRAM\nui-core.vcxproj"
+          if (Test-Path $nuiCoreProj) {
+            Remove-Item "$nuiCoreProj" -Force
+            Remove-Item "$nuiCoreProj.filters" -Force -ErrorAction SilentlyContinue
+            Write-Output "Deleted nui-core .vcxproj files"
           }
           
           cd code\build\$env:PROGRAM
