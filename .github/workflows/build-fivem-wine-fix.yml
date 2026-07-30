@@ -45,7 +45,6 @@ jobs:
               if (Test-Path "$p\mscorlib.dll") { $src = $p; break }
             }
             if (-not $src) {
-              # Search recursively
               $src = Get-ChildItem "$nugetDir\extracted" -Filter "mscorlib.dll" -Recurse | Select-Object -First 1 -ExpandProperty DirectoryName
             }
             if ($src) {
@@ -56,29 +55,6 @@ jobs:
             }
           } else {
             Write-Output ".NET 4.6 reference assemblies already present"
-          }
-          
-          # Install ATL build tools for C++ projects
-          Write-Output "Installing ATL build tools..."
-          $vsInstallerDir = "C:\Program Files (x86)\Microsoft Visual Studio\Installer"
-          $setupExe = Join-Path $vsInstallerDir "setup.exe"
-          if (Test-Path $setupExe) {
-            $vsPath = & "$vsInstallerDir\vswhere.exe" -latest -property installationPath
-            if ($vsPath) {
-              Write-Output "Modifying VS at $vsPath to add ATL..."
-              $proc = Start-Process -FilePath $setupExe -ArgumentList "modify --installPath `"$vsPath`" --add Microsoft.VisualStudio.Component.VC.ATL --passive --norestart" -NoNewWindow -PassThru
-              if ($proc) {
-                Write-Output "Waiting for ATL installer (PID $($proc.Id)) to finish..."
-                $proc | Wait-Process -Timeout 300 -ErrorAction SilentlyContinue
-                if (-not $proc.HasExited) {
-                  Write-Output "ATL install timed out after 5 min, killing..."
-                  $proc | Stop-Process -Force
-                }
-                Write-Output "ATL installer exited with code $($proc.ExitCode)"
-              }
-            }
-          } else {
-            Write-Output "VS installer not found at $setupExe"
           }
           
           Write-Output "SDK setup done"
@@ -116,10 +92,27 @@ jobs:
           cd $env:ROOT_REPO
           Write-Output "Building in $pwd"
           
+          # Fix ffi-napi: yarn global cache has ip-address with ?? operator (needs Node 14+),
+          # but node-gyp uses Node 12. Patch the file to use || instead.
+          $ipv6file = "$env:USERPROFILE\AppData\Local\Yarn\Data\global\node_modules\ip-address\dist\ipv6.js"
+          if (Test-Path $ipv6file) {
+            Write-Output "Patching $ipv6file for Node.js 12 compatibility..."
+            (Get-Content $ipv6file) -replace '\?\?', '||' | Set-Content $ipv6file
+          }
+          
           .\fxd.ps1 get-chrome
           .\prebuild.cmd
           
           .\fxd.ps1 gen -game $env:PROGRAM
+          
+          # Remove nui-core from solution (requires ATL build tools not available on runner)
+          $slnFile = "code\build\$env:PROGRAM\CitizenMP.sln"
+          if (Test-Path $slnFile) {
+            $sln = Get-Content $slnFile
+            $sln = $sln -replace '(?ms)^Project\("[^"]+"\) = "nui-core".*?EndProject\r?\n', ''
+            $sln | Set-Content $slnFile
+            Write-Output "Removed nui-core project from solution"
+          }
           
           cd code\build\$env:PROGRAM
           
