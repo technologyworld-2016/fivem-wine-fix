@@ -118,6 +118,29 @@ jobs:
           # GitHub Actions sets massive env blocks that exceed the 32KB limit
           $keepVars = @("PATH", "PROGRAM", "ROOT_REPO", "ROOT_DEP", "JOB_SLOTS", "WindowsSDKVersion", "SYSTEMROOT", "TEMP", "TMP", "USERNAME", "COMPUTERNAME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "NODE_PATH", "OS", "PATHEXT", "COMSPEC", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS", "VCINSTALLDIR", "VSCMD_VER", "windir", "ProgramFiles", "ProgramFiles(x86)", "CommonProgramFiles", "CommonProgramW6432", "ProgramW6432", "SystemDrive", "PSModulePath", "APPDATA", "LOCALAPPDATA", "PUBLIC", "ProgramData", "ALLUSERSPROFILE")
           $origPathCount = ($env:PATH -split ";").Count
+
+          # Resolve the tools we must keep BEFORE trimming, and preserve their real
+          # directories. Pattern-matching for these is unreliable: yarn ships in the npm
+          # global prefix (no "Yarn" in the path) and msys64 is not on PATH by default,
+          # so a regex guess silently drops them and the failure surfaces much later.
+          $forcedPathDirs = @()
+          foreach ($tool in @("yarn", "yarn.cmd", "node", "npm.cmd", "git", "sh")) {
+            $cmd = Get-Command $tool -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($cmd -and $cmd.Source) {
+              $dir = Split-Path $cmd.Source -Parent
+              if ($dir -and ($forcedPathDirs -notcontains $dir)) {
+                $forcedPathDirs += $dir
+                Write-Output "Preserving PATH dir for ${tool}: $dir"
+              }
+            } else {
+              Write-Output "NOTE: $tool not found on the pre-trim PATH"
+            }
+          }
+          # prebuild_natives.cmd runs `sh build.sh`, so MSYS must survive the trim too.
+          foreach ($p in @("C:\msys64\usr\bin", "C:\msys64\mingw64\bin")) {
+            if ((Test-Path $p) -and ($forcedPathDirs -notcontains $p)) { $forcedPathDirs += $p }
+          }
+
           $envKeys = @(Get-ChildItem Env: | Select-Object -ExpandProperty Name)
           foreach ($key in $envKeys) { if ($key -notin $keepVars) { Remove-Item "Env:$key" -ErrorAction SilentlyContinue } }
           # Filter PATH: keep system + git + msys2 + node + python + msbuild paths
@@ -134,16 +157,22 @@ jobs:
           if ($pathEntries.Count -lt 5) {
             $pathEntries = @("C:\Windows\system32", "C:\Windows", "C:\msys64\usr\bin", "C:\hostedtoolcache\windows\node\20.12.1\x64", "C:\Program Files\PowerShell\7")
           }
+          # Put the resolved tool dirs first so they win regardless of the patterns above.
+          $pathEntries = @($forcedPathDirs + $pathEntries) | Select-Object -Unique
           $env:PATH = [string]::Join(";", $pathEntries)
           Write-Output "Trimmed PATH from $origPathCount to $($pathEntries.Count) entries"
           $pathEntries | ForEach-Object { Write-Output "  PATH: $_" }
 
           # The trim previously ate yarn, which only surfaced ~4 minutes later as
           # "PREBUILD : error YARN". Fail here instead, where the cause is obvious.
-          foreach ($tool in @("yarn", "node", "git")) {
+          # sh/pacman are only warnings: prebuild_natives.cmd prepends C:\msys64\usr\bin
+          # to PATH itself, so they can legitimately be absent here.
+          foreach ($tool in @("yarn", "node", "git", "sh", "pacman")) {
             $found = Get-Command $tool -ErrorAction SilentlyContinue
             if ($found) {
               Write-Output "OK: $tool -> $($found.Source)"
+            } elseif ($tool -in @("sh", "pacman")) {
+              Write-Output "NOTE: $tool not on trimmed PATH (prebuild_natives.cmd adds msys64 itself)"
             } else {
               Write-Output "::error::$tool not found on trimmed PATH"
               exit 1
