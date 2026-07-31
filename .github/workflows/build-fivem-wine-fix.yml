@@ -190,23 +190,45 @@ jobs:
             Write-Output "Pre-placed Node 20 at $bundledNodeDir\node.exe with 2099 timestamp"
           }
           
-          # DIAGNOSTIC: test spawn with copied node.exe
-          Write-Output "=== DIAGNOSTIC: testing spawn with copied node.exe ==="
-          & "$bundledNodeDir\node.exe" -e "const c=require('child_process'); try { const r=c.spawnSync(process.execPath,['-e','console.log(process.version)'],{encoding:'utf8'}); console.log('SPAWN PIPE OK:', JSON.stringify(r.stdout)); } catch(e) { console.log('SPAWN PIPE FAILED:', e.code, e.message); }" 2>&1
-          & "$bundledNodeDir\node.exe" -e "const c=require('child_process'); try { const r=c.spawnSync(process.execPath,['-e','console.log(process.version)'],{encoding:'utf8',stdio:'inherit'}); console.log('SPAWN INHERIT OK'); } catch(e) { console.log('SPAWN INHERIT FAILED:', e.code, e.message); }" 2>&1
-          & "$bundledNodeDir\node.exe" -e "const c=require('child_process'); try { const r=c.spawnSync('cmd.exe',['/c','echo','hi'],{encoding:'utf8',stdio:'inherit'}); console.log('SPAWN CMD INHERIT OK'); } catch(e) { console.log('SPAWN CMD INHERIT FAILED:', e.code, e.message); }" 2>&1
-          # CVE-2024-27980 test: spawn a .cmd directly WITHOUT shell:true (what node-gyp-build bin.js:29 does)
-          Set-Content -Path "$bundledNodeDir\spawntest.cmd" -Value "@echo SPAWNCMD OK"
-          & "$bundledNodeDir\node.exe" -e "const c=require('child_process'); try { const r=c.spawnSync(process.argv[1],[],{encoding:'utf8'}); console.log('SPAWN CMD NO-SHELL OK:', JSON.stringify(r.stdout)); } catch(e) { console.log('SPAWN CMD NO-SHELL FAILED:', e.code, e.message); }" "$bundledNodeDir\spawntest.cmd" 2>&1
-          Write-Output "=== DIAGNOSTIC done ==="
+          # CEF setup - upstream does this in code/tools/ci/psm1/cfxSetupCEF.psm1, which
+          # this workflow never called. vendor/cef only holds PLACE_CEF_HERE.txt in git, so
+          # libcef.lib was missing and nui-gsclient failed with LNK1181.
+          $cefDir = "vendor\cef"
+          $cefBuildName = (Get-Content -Encoding ascii "$cefDir\cef_build_name.txt").Trim()
+          Write-Output "CEF build: $cefBuildName"
+          if (-not (Test-Path "$cefDir\Release\libcef.lib")) {
+            $cefZip = "$env:TEMP\cef.zip"
+            $cefTmp = "$env:TEMP\cef-extract"
+            curl.exe -Lf --retry 3 --retry-delay 5 -o $cefZip "https://runtime.fivem.net/build/cef/$cefBuildName.zip"
+            if ($LASTEXITCODE -ne 0) { Write-Output "::error::failed to download CEF"; exit 1 }
+            New-Item -ItemType Directory -Force $cefTmp | Out-Null
+            tar.exe -C $cefTmp -xf $cefZip
+            if ($LASTEXITCODE -ne 0) { Write-Output "::error::failed to extract CEF"; exit 1 }
+            Copy-Item -Force -Recurse -Path "$cefTmp\$cefBuildName\*" -Destination "$cefDir\"
+            Remove-Item -Force -Recurse $cefTmp -ErrorAction SilentlyContinue
+            Remove-Item -Force $cefZip -ErrorAction SilentlyContinue
+          } else {
+            Write-Output "CEF already present"
+          }
+          if (-not (Test-Path "$cefDir\Release\libcef.lib")) {
+            Write-Output "::error::libcef.lib still missing after CEF setup"
+            exit 1
+          }
+          Write-Output "CEF ready: $((Get-Item "$cefDir\Release\libcef.lib").Length) bytes"
           
           .\prebuild.cmd
           
           .\fxd.ps1 gen -game $env:PROGRAM
           
-          # Remove nui-core from solution (requires ATL build tools not available on runner)
+          # nui-core was dropped on the theory that it needs ATL, but no ATL error ever
+          # appeared in the logs -- the real failure was the missing CEF SDK (fetched
+          # above now). nui-core/component.lua only pulls in CEF (libcef, libcef_dll),
+          # nothing ATL-specific, and dropping it is what breaks conhost-v2 with 6
+          # unresolved nui:: symbols and nui-gsclient with LNK1181. Keep it in the build.
+          # Set this to $true to restore the old behaviour if ATL really is missing.
+          $removeNuiCore = $false
           $slnFile = "code\build\$env:PROGRAM\CitizenMP.sln"
-          if (Test-Path $slnFile) {
+          if ($removeNuiCore -and (Test-Path $slnFile)) {
             $lines = Get-Content $slnFile
             $newLines = @()
             $skip = $false
@@ -229,13 +251,16 @@ jobs:
             $newLines | Set-Content $slnFile
             $countAfter = ((Get-Content $slnFile) | Where-Object { $_ -match "nui-core" } | Measure-Object).Count
             Write-Output "Removed nui-core from solution ($countBefore -> $countAfter)"
+          } elseif (-not (Test-Path $slnFile)) {
+            Write-Output "::error::Solution file not found at $slnFile"
+            exit 1
           } else {
-            Write-Output "Solution file not found at $slnFile"
+            Write-Output "Keeping nui-core in the solution (CEF is available)"
           }
-          
+
           # Also delete nui-core .vcxproj files so MSBuild can't find them
           $nuiCoreProj = "code\build\$env:PROGRAM\nui-core.vcxproj"
-          if (Test-Path $nuiCoreProj) {
+          if ($removeNuiCore -and (Test-Path $nuiCoreProj)) {
             Remove-Item "$nuiCoreProj" -Force
             Remove-Item "$nuiCoreProj.filters" -Force -ErrorAction SilentlyContinue
             Write-Output "Deleted nui-core .vcxproj files"
