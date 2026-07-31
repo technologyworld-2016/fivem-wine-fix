@@ -22,9 +22,10 @@ YARN="$NODE $ROOT/yarn_cli.js --mutex network"
 cd $ROOT/../native-doc-tooling/
 
 # node-gyp >= 12.1.0 supports Visual Studio 2026 (18.x) on windows-latest runners
-$YARN global add node-gyp@12.1.0
+# --ignore-engines: 12.1.0 declares node ^20.17.0, but we use 20.12.1 (pre CVE-2024-27980, spawn EINVAL)
+$YARN global add node-gyp@12.1.0 --ignore-engines
 # install all deps with node-gyp 12.1.0 locally so node-gyp-build spawns a VS2026-aware node-gyp
-$YARN add node-gyp@12.1.0
+$YARN add node-gyp@12.1.0 --ignore-engines
 
 cd $ROOT/../natives/
 
