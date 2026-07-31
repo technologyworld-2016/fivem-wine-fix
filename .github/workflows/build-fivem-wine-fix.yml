@@ -202,8 +202,17 @@ jobs:
             curl.exe -Lf --retry 3 --retry-delay 5 -o $cefZip "https://runtime.fivem.net/build/cef/$cefBuildName.zip"
             if ($LASTEXITCODE -ne 0) { Write-Output "::error::failed to download CEF"; exit 1 }
             New-Item -ItemType Directory -Force $cefTmp | Out-Null
-            tar.exe -C $cefTmp -xf $cefZip --force-local
-            if ($LASTEXITCODE -ne 0) { Write-Output "::error::failed to extract CEF"; exit 1 }
+            # Do NOT use bare `tar` here: this step forces C:\msys64\usr\bin onto PATH
+            # (so `sh` resolves), and MSYS tar is GNU tar, which cannot read zip at all
+            # -- first "Cannot connect to C:", then "This does not look like a tar
+            # archive" once --force-local fixed the drive-letter parsing. Expand-Archive
+            # is native, PATH-independent, and already used for the .nupkg above.
+            try {
+              Expand-Archive -Path $cefZip -DestinationPath $cefTmp -Force -ErrorAction Stop
+            } catch {
+              Write-Output "::error::failed to extract CEF: $($_.Exception.Message)"
+              exit 1
+            }
             Copy-Item -Force -Recurse -Path "$cefTmp\$cefBuildName\*" -Destination "$cefDir\"
             Remove-Item -Force -Recurse $cefTmp -ErrorAction SilentlyContinue
             Remove-Item -Force $cefZip -ErrorAction SilentlyContinue
