@@ -31,22 +31,37 @@ $YARN add node-gyp@12.1.0 --ignore-scripts --ignore-engines
 # gyp-next regression vs gyp 9.x: rules whose action already starts with 'call'
 # (libffi preprocess_asm) are emitted as `call "call" script.cmd` which cmd.exe
 # cannot run ('"call"' is not recognized). node-gyp 9 emitted `call call script.cmd`.
+# The match/replacement keep their leading indentation so the emitted Python
+# nests the assignment under the new `if` (a bare replace produces IndentationError).
+TOOLING_DIR=$(pwd)
+NODE_GYP_DIR="$TOOLING_DIR/node_modules/node-gyp"
 cat > /tmp/patch-msvs.py.js <<'EOF'
 const fs = require('fs');
-const p = 'node_modules/node-gyp/gyp/pylib/gyp/generator/msvs.py';
-const old = "command[1] = '\"%s\"' % command[1]";
-const neu = "if command[1] != 'call':\n            command[1] = '\"%s\"' % command[1]";
+const p = process.argv[2];
+const old = "            command[1] = '\"%s\"' % command[1]\n";
+const neu = "            if command[1] != 'call':\n                command[1] = '\"%s\"' % command[1]\n";
 const s = fs.readFileSync(p, 'utf8');
-if (!s.includes(old)) { console.error('PATCH SKIPPED: msvs.py pattern not found'); process.exit(1); }
+const n = s.split(old).length - 1;
+if (n !== 1) { console.error('PATCH FAILED: expected 1 match, found ' + n + ' in ' + p); process.exit(1); }
 fs.writeFileSync(p, s.replace(old, neu));
 console.log('patched gyp msvs.py: skip quoting when command is already call');
 EOF
-$NODE /tmp/patch-msvs.py.js
+$NODE /tmp/patch-msvs.py.js "$NODE_GYP_DIR/gyp/pylib/gyp/generator/msvs.py"
+
+# fail fast if the patch produced invalid Python rather than 3 minutes later at MSBuild time.
+# A missing interpreter must not abort the build, so only a real parse failure exits.
+PYBIN=$(command -v python || command -v python3 || true)
+if [ -n "$PYBIN" ]; then
+	"$PYBIN" -c "import ast,sys; ast.parse(open(sys.argv[1]).read()); print('msvs.py syntax OK')" \
+		"$NODE_GYP_DIR/gyp/pylib/gyp/generator/msvs.py" || exit 1
+else
+	echo "WARNING: no python found to syntax-check patched msvs.py"
+fi
 
 # ffi-napi postinstall was skipped by --ignore-scripts, build it manually
 # (node-gyp uses VCINSTALLDIR/VSCMD_VER env vars to find VS2026)
 cd node_modules/ffi-napi
-PATH="$PWD/../../.bin:$PATH" $NODE ../../node-gyp/bin/node-gyp.js rebuild
+PATH="$TOOLING_DIR/node_modules/.bin:$PATH" $NODE "$NODE_GYP_DIR/bin/node-gyp.js" rebuild
 
 cd $ROOT/../natives/
 
