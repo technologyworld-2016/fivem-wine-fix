@@ -25,7 +25,28 @@ cd $ROOT/../native-doc-tooling/
 # --ignore-engines: 12.1.0 declares node ^20.17.0, but we use 20.12.1 (pre CVE-2024-27980, spawn EINVAL)
 $YARN global add node-gyp@12.1.0 --ignore-engines
 # install all deps with node-gyp 12.1.0 locally so node-gyp-build spawns a VS2026-aware node-gyp
-$YARN add node-gyp@12.1.0 --ignore-engines
+# --ignore-scripts: ffi-napi's postinstall would fail; build it manually below
+$YARN add node-gyp@12.1.0 --ignore-scripts --ignore-engines
+
+# gyp-next regression vs gyp 9.x: rules whose action already starts with 'call'
+# (libffi preprocess_asm) are emitted as `call "call" script.cmd` which cmd.exe
+# cannot run ('"call"' is not recognized). node-gyp 9 emitted `call call script.cmd`.
+cat > /tmp/patch-msvs.py.js <<'EOF'
+const fs = require('fs');
+const p = 'node_modules/node-gyp/gyp/pylib/gyp/generator/msvs.py';
+const old = "command[1] = '\"%s\"' % command[1]";
+const neu = "if command[1] != 'call':\n            command[1] = '\"%s\"' % command[1]";
+const s = fs.readFileSync(p, 'utf8');
+if (!s.includes(old)) { console.error('PATCH SKIPPED: msvs.py pattern not found'); process.exit(1); }
+fs.writeFileSync(p, s.replace(old, neu));
+console.log('patched gyp msvs.py: skip quoting when command is already call');
+EOF
+$NODE /tmp/patch-msvs.py.js
+
+# ffi-napi postinstall was skipped by --ignore-scripts, build it manually
+# (node-gyp uses VCINSTALLDIR/VSCMD_VER env vars to find VS2026)
+cd node_modules/ffi-napi
+PATH="$PWD/../../.bin:$PATH" $NODE ../../node-gyp/bin/node-gyp.js rebuild
 
 cd $ROOT/../natives/
 
