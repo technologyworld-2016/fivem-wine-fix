@@ -26,12 +26,15 @@ NUIRenderHandler::NUIRenderHandler(NUIClient* client)
 
 NUIRenderHandler::~NUIRenderHandler()
 {
+#if defined(CEF_USE_ATL)
 	if (m_dropTarget)
 	{
 		m_dropTarget->CancelCallback();
 	}
+#endif
 }
 
+#if defined(CEF_USE_ATL)
 CComPtr<DropTargetWin> NUIRenderHandler::GetDropTarget()
 {
 	if (!m_dropTarget)
@@ -43,6 +46,7 @@ CComPtr<DropTargetWin> NUIRenderHandler::GetDropTarget()
 	}
 	return m_dropTarget;
 }
+#endif
 
 void NUIRenderHandler::GetViewRect(CefRefPtr<CefBrowser> browser, CefRect& rect)
 {
@@ -279,6 +283,7 @@ void NUIRenderHandler::PaintPopup(const void* buffer, int width, int height)
 	window->AddDirtyRect(m_popupRect);
 }
 
+#if defined(CEF_USE_ATL)
 bool NUIRenderHandler::StartDragging(CefRefPtr<CefBrowser> browser, CefRefPtr<CefDragData> drag_data, CefRenderHandler::DragOperationsMask allowed_ops, int x, int y)
 {
 	auto dropTarget = GetDropTarget();
@@ -306,12 +311,19 @@ bool NUIRenderHandler::StartDragging(CefRefPtr<CefBrowser> browser, CefRefPtr<Ce
 	browser->GetHost()->DragSourceSystemDragEnded();
 	return true;
 }
+#else
+bool NUIRenderHandler::StartDragging(CefRefPtr<CefBrowser> browser, CefRefPtr<CefDragData> drag_data, CefRenderHandler::DragOperationsMask allowed_ops, int x, int y)
+{
+	return false;
+}
+#endif
 
 void NUIRenderHandler::UpdateDragCursor(CefRefPtr<CefBrowser> browser,
 	CefRenderHandler::DragOperation operation) {
 	m_currentDragOp = operation;
 }
 
+#if defined(CEF_USE_ATL)
 CefBrowserHost::DragOperationsMask NUIRenderHandler::OnDragEnter(
 	CefRefPtr<CefDragData> drag_data,
 	CefMouseEvent ev,
@@ -346,3 +358,4 @@ CefBrowserHost::DragOperationsMask NUIRenderHandler::OnDrop(
 	}
 	return m_currentDragOp;
 }
+#endif  // defined(CEF_USE_ATL)

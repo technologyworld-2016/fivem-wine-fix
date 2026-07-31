@@ -11,7 +11,10 @@
 #include <include/cef_render_handler.h>
 #include "CefDragDropHandler.h"
 
-class NUIRenderHandler : public CefRenderHandler, public OsrDragEvents
+class NUIRenderHandler : public CefRenderHandler
+#if defined(CEF_USE_ATL)
+	, public OsrDragEvents
+#endif
 {
 public:
 	NUIRenderHandler(NUIClient* client);
@@ -58,6 +61,7 @@ private:
 
 	IMPLEMENT_REFCOUNTING(NUIRenderHandler);
 
+#if defined(CEF_USE_ATL)
 private:
 	CefBrowserHost::DragOperationsMask OnDragEnter(
 		CefRefPtr<CefDragData> drag_data,
@@ -76,6 +80,7 @@ public:
 
 private:
 	CComPtr<DropTargetWin> m_dropTarget;
+#endif
 
 	DragOperation m_currentDragOp;
 };

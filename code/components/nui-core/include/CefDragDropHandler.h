@@ -4,7 +4,7 @@
 // automatically if using a supported Visual Studio version. Pass -DUSE_ATL=OFF
 // to the CMake command-line to disable use of ATL.
 // Uncomment this line to manually enable ATL support.
-#define CEF_USE_ATL 1
+//#define CEF_USE_ATL 1
 
 #if defined(CEF_USE_ATL)
 
