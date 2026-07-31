@@ -21,8 +21,10 @@ YARN="$NODE $ROOT/yarn_cli.js --mutex network"
 # install yarn deps
 cd $ROOT/../native-doc-tooling/
 
-$YARN global add node-gyp@9.3.1
-$YARN
+# node-gyp >= 12.1.0 supports Visual Studio 2026 (18.x) on windows-latest runners
+$YARN global add node-gyp@12.1.0
+# install all deps with node-gyp 12.1.0 locally so node-gyp-build spawns a VS2026-aware node-gyp
+$YARN add node-gyp@12.1.0
 
 cd $ROOT/../natives/
 
