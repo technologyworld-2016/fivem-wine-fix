@@ -94,7 +94,7 @@ jobs:
           
           # Strip non-essential env vars to avoid Windows CreateProcess buffer overflow (spawn EINVAL)
           # GitHub Actions sets massive env blocks that exceed the 32KB limit
-          $keepVars = @("PATH", "PROGRAM", "ROOT_REPO", "ROOT_DEP", "JOB_SLOTS", "WindowsSDKVersion", "SYSTEMROOT", "TEMP", "TMP", "USERNAME", "COMPUTERNAME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "NODE_PATH")
+          $keepVars = @("PATH", "PROGRAM", "ROOT_REPO", "ROOT_DEP", "JOB_SLOTS", "WindowsSDKVersion", "SYSTEMROOT", "TEMP", "TMP", "USERNAME", "COMPUTERNAME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "NODE_PATH", "OS", "PATHEXT", "COMSPEC", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS")
           $origPathCount = ($env:PATH -split ";").Count
           $envKeys = @(Get-ChildItem Env: | Select-Object -ExpandProperty Name)
           foreach ($key in $envKeys) { if ($key -notin $keepVars) { Remove-Item "Env:$key" -ErrorAction SilentlyContinue } }
