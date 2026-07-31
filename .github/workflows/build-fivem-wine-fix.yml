@@ -92,8 +92,24 @@ jobs:
           cd $env:ROOT_REPO
           Write-Output "Building in $pwd"
           
-          # Clean = -prefixed env vars (GitHub Actions sets these, causes spawn EINVAL on Windows)
-          Get-ChildItem Env: | Where-Object { $_.Name -match '^=' } | Remove-Item
+          # Strip non-essential env vars to avoid Windows CreateProcess buffer overflow (spawn EINVAL)
+          # GitHub Actions sets massive env blocks that exceed the 32KB limit
+          $keepVars = @("PATH", "PROGRAM", "ROOT_REPO", "ROOT_DEP", "JOB_SLOTS", "WindowsSDKVersion", "SYSTEMROOT", "TEMP", "TMP", "USERNAME", "COMPUTERNAME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "NODE_PATH")
+          $origPathCount = ($env:PATH -split ";").Count
+          $envKeys = @(Get-ChildItem Env: | Select-Object -ExpandProperty Name)
+          foreach ($key in $envKeys) { if ($key -notin $keepVars) { Remove-Item "Env:$key" -ErrorAction SilentlyContinue } }
+          # Filter PATH: keep only system + msys2 + node + msbuild paths
+          $essentialPathPatterns = @("^C:\\Windows", "^C:\\Program Files\\PowerShell", "^C:\\msys64", "^C:\\hostedtoolcache.*node", "^C:\\Program Files.*MSBuild", "^C:\\Program Files.*Microsoft Visual", "^C:\\Program Files \\(x86\\)\\Microsoft SDKs", "^C:\\Program Files \\(x86\\)\\Windows Kits")
+          $pathEntries = ($env:PATH -split ";") | Where-Object { 
+            $keep = $false
+            foreach ($pat in $essentialPathPatterns) { if ($_ -match $pat) { $keep = $true; break } }
+            $keep
+          } | Select-Object -Unique
+          if ($pathEntries.Count -lt 5) {
+            $pathEntries = @("C:\Windows\system32", "C:\Windows", "C:\msys64\usr\bin", "C:\hostedtoolcache\windows\node\20.20.2\x64", "C:\Program Files\PowerShell\7")
+          }
+          $env:PATH = [string]::Join(";", $pathEntries)
+          Write-Output "Trimmed PATH from $origPathCount to $($pathEntries.Count) entries"
           
           # Pre-place Node 20 at ext/native-doc-gen/node.exe with future timestamp
           # build.sh's curl -z won't overwrite a newer file, so this prevents download failures
