@@ -98,8 +98,8 @@ jobs:
           $origPathCount = ($env:PATH -split ";").Count
           $envKeys = @(Get-ChildItem Env: | Select-Object -ExpandProperty Name)
           foreach ($key in $envKeys) { if ($key -notin $keepVars) { Remove-Item "Env:$key" -ErrorAction SilentlyContinue } }
-          # Filter PATH: keep only system + msys2 + node + msbuild paths
-          $essentialPathPatterns = @("^C:\\Windows", "^C:\\Program Files\\PowerShell", "^C:\\msys64", "^C:\\hostedtoolcache.*node", "^C:\\Program Files.*MSBuild", "^C:\\Program Files.*Microsoft Visual", "^C:\\Program Files \\(x86\\)\\Microsoft SDKs", "^C:\\Program Files \\(x86\\)\\Windows Kits")
+          # Filter PATH: keep system + git + msys2 + node + python + msbuild paths
+          $essentialPathPatterns = @("^C:\\Windows", "^C:\\Program Files\\Git", "^C:\\Program Files\\PowerShell", "^C:\\msys64", "^C:\\hostedtoolcache", "^C:\\Program Files.*MSBuild", "^C:\\Program Files.*Microsoft Visual", "^C:\\Program Files \\(x86\\)\\Microsoft SDKs", "^C:\\Program Files \\(x86\\)\\Windows Kits", "^C:\\Users\\\\runneradmin\\\\AppData\\\\Local\\\\Yarn")
           $pathEntries = ($env:PATH -split ";") | Where-Object { 
             $keep = $false
             foreach ($pat in $essentialPathPatterns) { if ($_ -match $pat) { $keep = $true; break } }
