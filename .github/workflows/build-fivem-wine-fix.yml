@@ -121,7 +121,11 @@ jobs:
           $envKeys = @(Get-ChildItem Env: | Select-Object -ExpandProperty Name)
           foreach ($key in $envKeys) { if ($key -notin $keepVars) { Remove-Item "Env:$key" -ErrorAction SilentlyContinue } }
           # Filter PATH: keep system + git + msys2 + node + python + msbuild paths
-          $essentialPathPatterns = @("^C:\\Windows", "^C:\\Program Files\\Git", "^C:\\Program Files\\PowerShell", "^C:\\msys64", "^C:\\hostedtoolcache", "^C:\\Program Files.*MSBuild", "^C:\\Program Files.*Microsoft Visual", "^C:\\Program Files \\(x86\\)\\Microsoft SDKs", "^C:\\Program Files \\(x86\\)\\Windows Kits", "^C:\\Users\\\\runneradmin\\\\AppData\\\\Local\\\\Yarn")
+          # NOTE: these are regexes, so a literal backslash is "\\". The old Yarn entry
+          # used "\\\\" (matching a *doubled* backslash, which never occurs), so Yarn was
+          # silently trimmed and run_prebuild.ps1 died with "Could not execute `yarn`".
+          # Match Yarn/npm anywhere in the path rather than under a hardcoded username.
+          $essentialPathPatterns = @("^C:\\Windows", "^C:\\Program Files\\Git", "^C:\\Program Files\\PowerShell", "^C:\\msys64", "^C:\\hostedtoolcache", "^C:\\Program Files.*MSBuild", "^C:\\Program Files.*Microsoft Visual", "^C:\\Program Files \\(x86\\)\\Microsoft SDKs", "^C:\\Program Files \\(x86\\)\\Windows Kits", "\\\\Yarn\\\\", "\\\\npm", "\\\\nodejs")
           $pathEntries = ($env:PATH -split ";") | Where-Object { 
             $keep = $false
             foreach ($pat in $essentialPathPatterns) { if ($_ -match $pat) { $keep = $true; break } }
@@ -132,6 +136,19 @@ jobs:
           }
           $env:PATH = [string]::Join(";", $pathEntries)
           Write-Output "Trimmed PATH from $origPathCount to $($pathEntries.Count) entries"
+          $pathEntries | ForEach-Object { Write-Output "  PATH: $_" }
+
+          # The trim previously ate yarn, which only surfaced ~4 minutes later as
+          # "PREBUILD : error YARN". Fail here instead, where the cause is obvious.
+          foreach ($tool in @("yarn", "node", "git")) {
+            $found = Get-Command $tool -ErrorAction SilentlyContinue
+            if ($found) {
+              Write-Output "OK: $tool -> $($found.Source)"
+            } else {
+              Write-Output "::error::$tool not found on trimmed PATH"
+              exit 1
+            }
+          }
           
           # Pre-place Node 20 at ext/native-doc-gen/node.exe with future timestamp
           # build.sh's curl -z won't overwrite a newer file, so this prevents download failures
