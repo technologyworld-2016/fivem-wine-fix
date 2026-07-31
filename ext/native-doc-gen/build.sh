@@ -58,6 +58,27 @@ else
 	echo "WARNING: no python found to syntax-check patched msvs.py"
 fi
 
+# ffi.cc does `#define NAPI_EXPERIMENTAL` ("until Node.js v12.17.0 is released"),
+# which on Node >= 20 headers makes node_api_nogc_env a *const* napi_env__*.
+# get-uv-event-loop-napi.h then assigns &napi_get_uv_event_loop (nogc/const env)
+# to a fn pointer typed with plain napi_env -> C2440 in C++ (only a warning in C).
+# NODE_API_EXPERIMENTAL_NOGC_ENV_OPT_OUT is Node's official opt-out: it makes
+# node_api_nogc_env identical to napi_env, so the assignment is well-typed.
+cat > /tmp/patch-binding-gyp.js <<'EOF'
+const fs = require('fs');
+const p = process.argv[2];
+const s = fs.readFileSync(p, 'utf8');
+if (s.includes('NODE_API_EXPERIMENTAL_NOGC_ENV_OPT_OUT')) {
+  console.log('binding.gyp already has the nogc opt-out'); process.exit(0);
+}
+const anchor = "'target_name': 'ffi_bindings',";
+if (!s.includes(anchor)) { console.error('PATCH FAILED: ffi_bindings target not found'); process.exit(1); }
+const neu = anchor + "\n    'defines': [ 'NODE_API_EXPERIMENTAL_NOGC_ENV_OPT_OUT' ],";
+fs.writeFileSync(p, s.replace(anchor, neu));
+console.log('patched ffi-napi binding.gyp: NODE_API_EXPERIMENTAL_NOGC_ENV_OPT_OUT');
+EOF
+$NODE /tmp/patch-binding-gyp.js "$TOOLING_DIR/node_modules/ffi-napi/binding.gyp"
+
 # ffi-napi postinstall was skipped by --ignore-scripts, build it manually
 # (node-gyp uses VCINSTALLDIR/VSCMD_VER env vars to find VS2026)
 cd node_modules/ffi-napi
