@@ -289,6 +289,25 @@ jobs:
           
           if ($MSBUILD_ERROR -eq 0) {
             Write-Output "Successfully built $env:PROGRAM"
+            # Gogsi's Wine patch lands in exactly two binaries: citicore ->
+            # CoreRT.dll (DllGameComponent.Win32.cpp, SEHTableHandler.Win32.cpp)
+            # and the launcher -> FiveM.exe (UpdaterUI.cpp, targetname "FiveM"
+            # under filter options:game=five). Confirm both exist before upload.
+            $relDir = "$env:ROOT_REPO\code\bin\five\release"
+            Write-Output "=== build output: $relDir ==="
+            if (Test-Path $relDir) {
+              Get-ChildItem $relDir -File | Sort-Object Name |
+                ForEach-Object { Write-Output ("  {0}  {1} bytes" -f $_.Name, $_.Length) }
+            }
+            $missing = @()
+            foreach ($f in @("CoreRT.dll", "FiveM.exe")) {
+              if (-not (Test-Path "$relDir\$f")) { $missing += $f }
+            }
+            if ($missing.Count -gt 0) {
+              Write-Output "::error::patched binaries missing from build output: $($missing -join ', ')"
+              exit 1
+            }
+            Write-Output "Both patched binaries present (CoreRT.dll, FiveM.exe)"
           } else {
             Write-Output "::error::Failed to build $env:PROGRAM, MSBuild returned with error code: $MSBUILD_ERROR"
             if (Test-Path errors.log) {
@@ -301,7 +320,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: FiveM-WineFix
+          # premake puts binaries in <root>/code/bin/<game>/release (binroot =
+          # "bin/" .. game, plus "/release" for the Release config), NOT in
+          # code/build/five/bin -- that path never existed, so with
+          # if-no-files-found: warn this step used to produce an empty artifact
+          # on an otherwise successful build.
           path: |
-            ${{ env.ROOT_REPO }}/code/build/five/bin/
-            ${{ env.ROOT_REPO }}/code/build/five/output/
-          if-no-files-found: warn
+            ${{ env.ROOT_REPO }}/code/bin/five/release/
+          if-no-files-found: error
