@@ -12,11 +12,41 @@ jobs:
   build_fivem:
     name: FiveM Windows Client
     runs-on: windows-latest
+    # Run 39 took 60 minutes end to end (42 of them in MSBuild), so a legitimate
+    # full build fits well inside this. Without it the ceiling is GitHub's 360min
+    # default, and a hung MSBuild is indistinguishable from a slow one from outside.
+    timeout-minutes: 90
     env:
       PROGRAM: five
     steps:
       - name: Add msbuild to PATH
         uses: microsoft/setup-msbuild@v2
+
+      # Run 39 failed with C1083 'atlcomcli.h' in nui-core. The published
+      # runner-images manifest documents VS2022 *with* ATL, but this runner only
+      # has VS2026 (18.x) -- same divergence that broke node-gyp. Report the truth
+      # cheaply and early instead of inferring it from a 60-minute build.
+      - name: Probe ATL availability
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $vsWhere = "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (Test-Path $vsWhere) {
+            Write-Output "=== VS installs ==="
+            & $vsWhere -all -products * -format value -property installationPath
+            Write-Output "=== installs WITH the ATL component ==="
+            $atlVs = & $vsWhere -all -products * -requires Microsoft.VisualStudio.Component.VC.ATL -format value -property installationPath
+            if ($atlVs) { $atlVs } else { Write-Output "(none report the ATL component)" }
+          }
+          Write-Output "=== atlcomcli.h on disk? ==="
+          $hits = Get-ChildItem "C:\Program Files\Microsoft Visual Studio" -Recurse -Filter atlcomcli.h -ErrorAction SilentlyContinue |
+                  Select-Object -First 5 -ExpandProperty FullName
+          if ($hits) {
+            $hits
+            Write-Output "ATL HEADERS PRESENT -- nui-core can build if the include dir is on the path"
+          } else {
+            Write-Output "ATL HEADERS ABSENT -- nui-core cannot compile on this image as-is"
+          }
 
       - name: Setup SDK
         shell: pwsh
