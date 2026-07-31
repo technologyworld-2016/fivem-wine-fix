@@ -62,7 +62,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # 20.12.1 is the last 20.x BEFORE CVE-2024-27980 (spawn EINVAL on .cmd without shell:true)
+          node-version: '20.12.1'
 
       - name: Checkout
         shell: bash
@@ -106,7 +107,7 @@ jobs:
             $keep
           } | Select-Object -Unique
           if ($pathEntries.Count -lt 5) {
-            $pathEntries = @("C:\Windows\system32", "C:\Windows", "C:\msys64\usr\bin", "C:\hostedtoolcache\windows\node\20.20.2\x64", "C:\Program Files\PowerShell\7")
+            $pathEntries = @("C:\Windows\system32", "C:\Windows", "C:\msys64\usr\bin", "C:\hostedtoolcache\windows\node\20.12.1\x64", "C:\Program Files\PowerShell\7")
           }
           $env:PATH = [string]::Join(";", $pathEntries)
           Write-Output "Trimmed PATH from $origPathCount to $($pathEntries.Count) entries"
@@ -114,7 +115,7 @@ jobs:
           # Pre-place Node 20 at ext/native-doc-gen/node.exe with future timestamp
           # build.sh's curl -z won't overwrite a newer file, so this prevents download failures
           $bundledNodeDir = ".\ext\native-doc-gen"
-          $node20Dir = "C:\hostedtoolcache\windows\node\20.20.2\x64"
+          $node20Dir = "C:\hostedtoolcache\windows\node\20.12.1\x64"
           if (Test-Path "$node20Dir\node.exe") {
             New-Item -ItemType Directory -Force $bundledNodeDir | Out-Null
             Copy-Item "$node20Dir\node.exe" "$bundledNodeDir\node.exe" -Force
@@ -127,6 +128,9 @@ jobs:
           & "$bundledNodeDir\node.exe" -e "const c=require('child_process'); try { const r=c.spawnSync(process.execPath,['-e','console.log(process.version)'],{encoding:'utf8'}); console.log('SPAWN PIPE OK:', JSON.stringify(r.stdout)); } catch(e) { console.log('SPAWN PIPE FAILED:', e.code, e.message); }" 2>&1
           & "$bundledNodeDir\node.exe" -e "const c=require('child_process'); try { const r=c.spawnSync(process.execPath,['-e','console.log(process.version)'],{encoding:'utf8',stdio:'inherit'}); console.log('SPAWN INHERIT OK'); } catch(e) { console.log('SPAWN INHERIT FAILED:', e.code, e.message); }" 2>&1
           & "$bundledNodeDir\node.exe" -e "const c=require('child_process'); try { const r=c.spawnSync('cmd.exe',['/c','echo','hi'],{encoding:'utf8',stdio:'inherit'}); console.log('SPAWN CMD INHERIT OK'); } catch(e) { console.log('SPAWN CMD INHERIT FAILED:', e.code, e.message); }" 2>&1
+          # CVE-2024-27980 test: spawn a .cmd directly WITHOUT shell:true (what node-gyp-build bin.js:29 does)
+          Set-Content -Path "$bundledNodeDir\spawntest.cmd" -Value "@echo SPAWNCMD OK"
+          & "$bundledNodeDir\node.exe" -e "const c=require('child_process'); try { const r=c.spawnSync(process.argv[1],[],{encoding:'utf8'}); console.log('SPAWN CMD NO-SHELL OK:', JSON.stringify(r.stdout)); } catch(e) { console.log('SPAWN CMD NO-SHELL FAILED:', e.code, e.message); }" "$bundledNodeDir\spawntest.cmd" 2>&1
           Write-Output "=== DIAGNOSTIC done ==="
           
           .\prebuild.cmd
