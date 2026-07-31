@@ -93,9 +93,30 @@ jobs:
           cd $env:ROOT_REPO
           Write-Output "Building in $pwd"
           
+          # Locate Visual Studio for node-gyp: its PowerShell-based VS detection fails
+          # under the trimmed env below, so set VCINSTALLDIR/VSCMD_VER (node-gyp check #1,
+          # filesystem-based, no PowerShell) before trimming.
+          $vsWhere = "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = $null
+          if (Test-Path $vsWhere) {
+            $vsPath = & $vsWhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          }
+          if (-not $vsPath) {
+            foreach ($p in @("C:\Program Files\Microsoft Visual Studio\2026\Enterprise", "C:\Program Files\Microsoft Visual Studio\18\Enterprise", "C:\Program Files\Microsoft Visual Studio\2026\BuildTools", "C:\Program Files\Microsoft Visual Studio\18\BuildTools")) {
+              if (Test-Path "$p\VC\vcvarsall.bat") { $vsPath = $p; break }
+            }
+          }
+          if ($vsPath) {
+            $env:VCINSTALLDIR = "$vsPath\VC"
+            $env:VSCMD_VER = "18.0.0.0"
+            Write-Output "Set VCINSTALLDIR=$env:VCINSTALLDIR VSCMD_VER=$env:VSCMD_VER for node-gyp"
+          } else {
+            Write-Output "WARNING: could not locate VS for node-gyp"
+          }
+          
           # Strip non-essential env vars to avoid Windows CreateProcess buffer overflow (spawn EINVAL)
           # GitHub Actions sets massive env blocks that exceed the 32KB limit
-          $keepVars = @("PATH", "PROGRAM", "ROOT_REPO", "ROOT_DEP", "JOB_SLOTS", "WindowsSDKVersion", "SYSTEMROOT", "TEMP", "TMP", "USERNAME", "COMPUTERNAME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "NODE_PATH", "OS", "PATHEXT", "COMSPEC", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS")
+          $keepVars = @("PATH", "PROGRAM", "ROOT_REPO", "ROOT_DEP", "JOB_SLOTS", "WindowsSDKVersion", "SYSTEMROOT", "TEMP", "TMP", "USERNAME", "COMPUTERNAME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "NODE_PATH", "OS", "PATHEXT", "COMSPEC", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS", "VCINSTALLDIR", "VSCMD_VER", "windir", "ProgramFiles", "ProgramFiles(x86)", "CommonProgramFiles", "CommonProgramW6432", "ProgramW6432", "SystemDrive", "PSModulePath", "APPDATA", "LOCALAPPDATA", "PUBLIC", "ProgramData", "ALLUSERSPROFILE")
           $origPathCount = ($env:PATH -split ";").Count
           $envKeys = @(Get-ChildItem Env: | Select-Object -ExpandProperty Name)
           foreach ($key in $envKeys) { if ($key -notin $keepVars) { Remove-Item "Env:$key" -ErrorAction SilentlyContinue } }
