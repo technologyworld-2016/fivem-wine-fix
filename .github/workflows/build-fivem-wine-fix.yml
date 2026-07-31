@@ -122,6 +122,12 @@ jobs:
             Write-Output "Pre-placed Node 20 at $bundledNodeDir\node.exe with 2099 timestamp"
           }
           
+          # DIAGNOSTIC: test spawn with copied node.exe
+          Write-Output "=== DIAGNOSTIC: testing spawn with copied node.exe ==="
+          & "$bundledNodeDir\node.exe" -e "const c=require('child_process'); try { const r=c.spawnSync(process.execPath,['-e','console.log(process.version)'],{encoding:'utf8'}); console.log('SPAWN OK:', JSON.stringify(r.stdout)); } catch(e) { console.log('SPAWN FAILED:', e.code, e.message); }" 2>&1
+          Write-Output "=== DIAGNOSTIC: testing spawn from original toolcache path ==="
+          & "$node20Dir\node.exe" -e "const c=require('child_process'); try { const r=c.spawnSync(process.execPath,['-e','console.log(process.version)'],{encoding:'utf8'}); console.log('SPAWN OK:', JSON.stringify(r.stdout)); } catch(e) { console.log('SPAWN FAILED:', e.code, e.message); }" 2>&1
+          
           .\prebuild.cmd
           
           .\fxd.ps1 gen -game $env:PROGRAM
