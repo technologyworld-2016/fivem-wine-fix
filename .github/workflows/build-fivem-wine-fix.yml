@@ -2,6 +2,11 @@ name: Build FiveM Client (Wine Fix)
 
 on:
   workflow_dispatch:
+    inputs:
+      msbuild_targets:
+        description: "Triage only: comma-separated MSBuild target list (e.g. conhost-v2,nui-gsclient). Empty = build the full solution."
+        required: false
+        default: ""
 
 jobs:
   build_fivem:
@@ -86,6 +91,20 @@ jobs:
           git remote add origin https://github.com/technologyworld-2016/fivem-wine-fix.git
           git pull origin wine-win10 --depth=1
           git submodule update --jobs=$JOB_SLOTS --init --depth=1
+
+          # Cache key for the CEF SDK: content is immutable per build name, so the
+          # key can never go stale. Safe to cache (unlike the MSBuild object tree,
+          # where a partially-restored state would make triage results untrustworthy).
+          CEF_NAME=$(tr -d '\r\n' < "$ROOT_REPO/vendor/cef/cef_build_name.txt")
+          echo "CEF_BUILD_NAME=$CEF_NAME" >> "$GITHUB_ENV"
+          echo "cef build name: $CEF_NAME"
+
+      - name: Cache CEF SDK
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.ROOT_REPO }}/vendor/cef
+          # Immutable per CEF build -> no restore-keys, no partial-hit fallback.
+          key: cef-${{ env.CEF_BUILD_NAME }}
 
       - name: Build
         shell: pwsh
@@ -284,7 +303,42 @@ jobs:
           $sdkVer = $sdkVer.TrimEnd('\')
           Write-Output "Using Windows SDK version: $sdkVer"
           
-          MSBuild.exe CitizenMP.sln -t:build -restore -p:RestorePackagesConfig=true -p:Configuration=release -p:Platform=x64 -p:WindowsTargetPlatformVersion=$sdkVer -maxcpucount:2 -v:q -fl1 "-flp1:logfile=errors.log;errorsonly"
+          # Triage input: build only the named targets instead of the whole solution.
+          # Empty (the default) keeps the normal full-solution path untouched.
+          # Built as an argument ARRAY, never interpolated into a command string --
+          # dispatch inputs are untrusted, and an unquoted splice into a pwsh command
+          # line is how you get a baffling failure at the worst possible moment.
+          $targetArg = "-t:build"
+          $rawTargets = "${{ github.event.inputs.msbuild_targets }}"
+          if ($rawTargets -and $rawTargets.Trim()) {
+            $targets = $rawTargets -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+            # MSBuild target names: letters, digits, _ - . and : only. Reject anything else.
+            $bad = $targets | Where-Object { $_ -notmatch '^[A-Za-z0-9_.:-]+$' }
+            if ($bad) {
+              Write-Output "::error::invalid MSBuild target name(s): $($bad -join ', ')"
+              exit 1
+            }
+            $targetArg = "-t:" + ($targets -join ';')
+            Write-Output "TRIAGE MODE: building only $($targets -join ', ')"
+            Write-Output "NOTE: the runner is cold every dispatch (no build cache), so this"
+            Write-Output "      still compiles each target's full dependency closure."
+          }
+
+          $msbuildArgs = @(
+            "CitizenMP.sln"
+            $targetArg
+            "-restore"
+            "-p:RestorePackagesConfig=true"
+            "-p:Configuration=release"
+            "-p:Platform=x64"
+            "-p:WindowsTargetPlatformVersion=$sdkVer"
+            "-maxcpucount:2"
+            "-v:q"
+            "-fl1"
+            "-flp1:logfile=errors.log;errorsonly"
+          )
+          Write-Output "MSBuild.exe $($msbuildArgs -join ' ')"
+          & MSBuild.exe @msbuildArgs
           $MSBUILD_ERROR = $LASTEXITCODE
           
           if ($MSBUILD_ERROR -eq 0) {
@@ -299,15 +353,21 @@ jobs:
               Get-ChildItem $relDir -File | Sort-Object Name |
                 ForEach-Object { Write-Output ("  {0}  {1} bytes" -f $_.Name, $_.Length) }
             }
-            $missing = @()
-            foreach ($f in @("CoreRT.dll", "FiveM.exe")) {
-              if (-not (Test-Path "$relDir\$f")) { $missing += $f }
+            # Only assert this for a full-solution build; a triage run that builds a
+            # single target legitimately won't produce the launcher.
+            if ($targetArg -eq "-t:build") {
+              $missing = @()
+              foreach ($f in @("CoreRT.dll", "FiveM.exe")) {
+                if (-not (Test-Path "$relDir\$f")) { $missing += $f }
+              }
+              if ($missing.Count -gt 0) {
+                Write-Output "::error::patched binaries missing from build output: $($missing -join ', ')"
+                exit 1
+              }
+              Write-Output "Both patched binaries present (CoreRT.dll, FiveM.exe)"
+            } else {
+              Write-Output "Triage build - skipping patched-binary assertion"
             }
-            if ($missing.Count -gt 0) {
-              Write-Output "::error::patched binaries missing from build output: $($missing -join ', ')"
-              exit 1
-            }
-            Write-Output "Both patched binaries present (CoreRT.dll, FiveM.exe)"
           } else {
             Write-Output "::error::Failed to build $env:PROGRAM, MSBuild returned with error code: $MSBUILD_ERROR"
             if (Test-Path errors.log) {
