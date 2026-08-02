@@ -1,0 +1,116 @@
+name: Build FiveM Windows
+
+on:
+  push:
+    branches: [ wine-win10 ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      CFX_DRY_RUN: 'false'
+      CFX_RETAIL_BUILD: 'false'
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git
+            base-devel
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-boost
+            mingw-w64-x86_64-openssl
+            mingw-w64-x86_64-curl
+            mingw-w64-x86_64-zlib
+            mingw-w64-x86_64-zstd
+            mingw-w64-x86_64-libiconv
+
+      - name: Install Python packages
+        run: |
+          pip install setuptools
+          pip install --upgrade pip
+
+      - name: Setup MSYS2 environment
+        run: |
+          $msys2 = "C:\msys64"
+          $path = "$msys2\mingw64\bin;$msys2\usr\bin;$env:Path"
+          echo "MSYS2_PATH=$path" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build FiveM
+        shell: powershell
+        run: |
+          # Set up environment
+          $env:Path = "C:\msys64\mingw64\bin;C:\msys64\usr\bin;$env:Path"
+          
+          # Navigate to repo
+          cd ${{ github.workspace }}
+          
+          # Get Chrome (CEF)
+          .\fxd.cmd get-chrome
+          
+          # Prebuild
+          .\prebuild.cmd
+          
+          # Generate build
+          .\fxd.cmd gen -game five
+          
+          # Generate VS solution
+          .\fxd.cmd vs -game five
+
+      - name: Build with MSBuild
+        shell: powershell
+        run: |
+          $env:Path = "C:\msys64\mingw64\bin;C:\msys64\usr\bin;$env:Path"
+          
+          # Build the solution
+          $sln = "${{ github.workspace }}\code\out\vs2022\five.sln"
+          if (-not (Test-Path $sln)) {
+            $sln = "${{ github.workspace }}\code\build\vs2022\five.sln"
+          }
+          if (-not (Test-Path $sln)) {
+            $sln = Get-ChildItem -Recurse -Filter "five.sln" | Select-Object -First 1 -ExpandProperty FullName
+          }
+          
+          Write-Host "Building solution: $sln"
+          
+          & "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MSBuild.exe" $sln `
+            /p:Configuration=Debug `
+            /p:Platform=x64 `
+            /m `
+            /verbosity:minimal
+
+      - name: Find nui-core.dll
+        shell: powershell
+        run: |
+          $dll = Get-ChildItem -Recurse -Filter "nui-core.dll" | Select-Object -First 1
+          if ($dll) {
+            Write-Host "Found nui-core.dll at: $($dll.FullName)"
+            echo "NUI_CORE_DLL=$($dll.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            Copy-Item $dll.FullName -Destination "${{ github.workspace }}\nui-core.dll"
+          } else {
+            Write-Error "nui-core.dll not found!"
+            exit 1
+          }
+
+      - name: Upload nui-core.dll artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nui-core-dll
+          path: nui-core.dll
+          retention-days: 7
