@@ -1,0 +1,62 @@
+name: Build P4 ANGLE Backend Patch
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - p4-angle-backend
+
+jobs:
+  build-fivem:
+    name: Build FiveM with P4 patch
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 1
+      
+      - name: Setup build environment
+        shell: pwsh
+        run: |
+          # Install Python setuptools
+          pip install setuptools
+          
+      - name: Download Chrome
+        shell: pwsh
+        run: |
+          .\fxd.ps1 get-chrome
+          
+      - name: Prebuild natives
+        shell: cmd
+        run: |
+          .\prebuild.cmd
+          
+      - name: Generate project
+        shell: pwsh
+        run: |
+          .\fxd.ps1 gen -game five
+          
+      - name: Build FiveM
+        shell: cmd
+        run: |
+          cd code\build\five
+          "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MsBuild.exe" CitizenMP.sln -t:build -restore -p:RestorePackagesConfig=true -p:preferredtoolarchitecture=x64 -p:configuration=release -maxcpucount:4 -v:q
+          
+      - name: Upload nui-core.dll artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fivem-p4-nui-core
+          path: code/bin/five/release/nui-core.dll
+          if-no-files-found: error
+          
+      - name: Upload full build artifacts (optional)
+        uses: actions/upload-artifact@v4
+        with:
+          name: fivem-p4-full-build
+          path: |
+            code/bin/five/release/*.dll
+            code/bin/five/release/*.exe
+          if-no-files-found: warn
