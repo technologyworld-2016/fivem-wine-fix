@@ -169,6 +169,7 @@ void NUIApp::OnContextReleased(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame
 void NUIApp::OnBeforeCommandLineProcessing(const CefString& process_type, CefRefPtr<CefCommandLine> command_line)
 {
 	static ConVar<bool> nuiUseInProcessGpu("nui_useInProcessGpu", ConVar_Archive, true);
+	static ConVar<std::string> nuiAngleBackend("nui_angleBackend", ConVar_Archive, "d3d11");
 
 	static std::string defaultUiUrl = "https://nui-game-internal/ui/app/index.html";
 	static ConVar<std::string> uiUrlVar("ui_url", ConVar_UserPref, defaultUiUrl);
@@ -212,7 +213,8 @@ void NUIApp::OnBeforeCommandLineProcessing(const CefString& process_type, CefRef
 
 	// some GPUs are in the GPU blacklist as 'forcing D3D9'
 	// this just forces D3D11 anyway.
-	command_line->AppendSwitchWithValue("use-angle", "d3d11");
+	// P4 patch: configurable ANGLE backend (gl/swiftshader for macOS MoltenVK compat)
+	command_line->AppendSwitchWithValue("use-angle", nuiAngleBackend.GetValue());
 
 	// CORB is not handled by CEF CefAddCrossOriginWhitelistEntry, disable CORS entirely
 	command_line->AppendSwitch("disable-web-security");
