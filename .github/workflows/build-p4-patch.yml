@@ -10,6 +10,7 @@ jobs:
   build-fivem:
     name: Build FiveM with P4 patch
     runs-on: windows-latest
+    timeout-minutes: 120
     
     steps:
       - name: Checkout repository
@@ -17,6 +18,21 @@ jobs:
         with:
           submodules: true
           fetch-depth: 1
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Cache yarn dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~\AppData\Local\Yarn
+            ext\native-doc-tooling\node_modules
+          key: ${{ runner.os }}-yarn-${{ hashFiles('ext/native-doc-tooling/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
       
       - name: Setup build environment
         shell: pwsh
@@ -31,6 +47,7 @@ jobs:
           
       - name: Prebuild natives
         shell: cmd
+        timeout-minutes: 30
         run: |
           .\prebuild.cmd
           
