@@ -39,6 +39,20 @@ jobs:
         run: |
           # Install Python setuptools
           pip install setuptools
+      
+      - name: Setup Visual Studio environment
+        uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: '[17.0,18.0)'
+      
+      - name: Setup Visual Studio environment variables
+        shell: pwsh
+        run: |
+          # Set VS environment for node-gyp
+          $vsPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          Write-Host "Visual Studio path: $vsPath"
+          echo "GYP_MSVS_VERSION=2022" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "GYP_MSVS_OVERRIDE_PATH=$vsPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           
       - name: Download Chrome
         shell: pwsh
