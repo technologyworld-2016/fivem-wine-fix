@@ -44,7 +44,6 @@ jobs:
       - name: Install Python packages
         run: |
           pip install setuptools
-          pip install --upgrade pip
 
       - name: Setup MSYS2 environment
         run: |
